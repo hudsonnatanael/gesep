@@ -19,3 +19,4 @@ class SensorDataResponse(SensorDataCreate):
 
     class Config:
         from_attributes = True
+        

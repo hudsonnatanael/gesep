@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "api_post"
+name = "gesep"
 version = "0.1.0"
 description = "FastAPI endpoint for ESP32 sensor data"
-authors = ["Luis Gustavo <luisgustavoteixeira@duck.com>"]
+authors = ["Hudson <hudson.alves@ufv.br>"]
 packages = [{ include = "app" }]
 
 [tool.poetry.dependencies]
