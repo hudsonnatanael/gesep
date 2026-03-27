@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sensor Data Extractor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --ink: #1a1f2e;
+      --accent: #0f766e;
+      --accent-2: #f59e0b;
+      --panel: #fffaf1;
+      --line: #d8cfbe;
+      --ok: #166534;
+      --err: #b91c1c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0% 0%, #ffe8b5 0%, transparent 40%),
+        radial-gradient(circle at 100% 100%, #b8e3dd 0%, transparent 45%),
+        var(--bg);
+      font-family: "Space Grotesk", sans-serif;
+    }
+
+    .shell {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 16px;
+    }
+
+    .hero {
+      border: 2px solid var(--line);
+      background: var(--panel);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 12px 30px rgba(26, 31, 46, 0.08);
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(1.5rem, 3.2vw, 2.6rem);
+      letter-spacing: 0.4px;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      opacity: 0.85;
+    }
+
+    .grid {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .field {
+      grid-column: span 2;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field.small { grid-column: span 1; }
+
+    label {
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+
+    input {
+      border: 2px solid var(--line);
+      background: white;
+      color: var(--ink);
+      border-radius: 10px;
+      padding: 10px 11px;
+      font: inherit;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+    }
+
+    .actions {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: 600 0.92rem/1 "Space Grotesk", sans-serif;
+      color: white;
+      transition: transform 120ms ease, opacity 120ms ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0); opacity: 0.92; }
+
+    .primary { background: var(--accent); }
+    .warn { background: var(--accent-2); color: #1b1302; }
+    .ghost { background: #1f2937; }
+
+    .status {
+      margin-top: 14px;
+      min-height: 24px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.86rem;
+    }
+
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--err); }
+
+    .table-wrap {
+      margin-top: 16px;
+      border: 2px solid var(--line);
+      background: #fff;
+      border-radius: 12px;
+      overflow: auto;
+      max-height: 60vh;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 820px;
+      font-size: 0.92rem;
+    }
+
+    thead {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f9f6ef;
+    }
+
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid #eee5d6;
+      padding: 10px 12px;
+      vertical-align: top;
+    }
+
+    th {
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #475569;
+    }
+
+    .mono {
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    @media (max-width: 900px) {
+      .field, .field.small { grid-column: span 6; }
+      .shell { margin: 10px auto; }
+      .hero { padding: 14px; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <h1>Sensor Data Extractor</h1>
+      <p>Filter, preview and export measurements saved in PostgreSQL.</p>
+
+      <div class="grid">
+        <div class="field">
+          <label for="deviceId">Device ID</label>
+          <input id="deviceId" type="text" placeholder="ESP32_PRODUCAO">
+        </div>
+
+        <div class="field">
+          <label for="startTime">Start Time</label>
+          <input id="startTime" type="datetime-local">
+        </div>
+
+        <div class="field">
+          <label for="endTime">End Time</label>
+          <input id="endTime" type="datetime-local">
+        </div>
+
+        <div class="field small">
+          <label for="skip">Skip</label>
+          <input id="skip" type="number" min="0" value="0">
+        </div>
+
+        <div class="field small">
+          <label for="limit">Limit</label>
+          <input id="limit" type="number" min="1" max="5000" value="200">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="btnLoad">Load Data</button>
+        <button class="warn" id="btnCsv">Download CSV</button>
+        <button class="ghost" id="btnJson">Download JSON</button>
+      </div>
+
+      <div id="status" class="status">Ready.</div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Device</th>
+              <th>tensao_shunt</th>
+              <th>Irradiance</th>
+              <th>Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td colspan="5" class="mono">No data loaded yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const rowsEl = document.getElementById("rows");
+
+    function setStatus(text, kind = "") {
+      statusEl.textContent = text;
+      statusEl.className = `status ${kind}`.trim();
+    }
+
+    function getParams(extra = {}) {
+      const deviceId = document.getElementById("deviceId").value.trim();
+      const startTime = document.getElementById("startTime").value;
+      const endTime = document.getElementById("endTime").value;
+      const skip = document.getElementById("skip").value || "0";
+      const limit = document.getElementById("limit").value || "200";
+
+      const params = new URLSearchParams();
+      params.set("skip", skip);
+      params.set("limit", limit);
+      if (deviceId) params.set("device_id", deviceId);
+      if (startTime) params.set("start_time", startTime);
+      if (endTime) params.set("end_time", endTime);
+
+      Object.entries(extra).forEach(([k, v]) => params.set(k, String(v)));
+      return params;
+    }
+
+    function renderRows(data) {
+      if (!Array.isArray(data) || data.length === 0) {
+        rowsEl.innerHTML = '<tr><td colspan="5" class="mono">No records found.</td></tr>';
+        return;
+      }
+
+      rowsEl.innerHTML = data.map((row) => `
+        <tr>
+          <td class="mono">${row.id}</td>
+          <td>${row.device_id}</td>
+          <td>${row.tensao_shunt}</td>
+          <td>${row.irradiance}</td>
+          <td class="mono">${row.timestamp ?? ""}</td>
+        </tr>
+      `).join("");
+    }
+
+    async function loadData() {
+      setStatus("Loading data...");
+      try {
+        const url = `/api/sensors/?${getParams().toString()}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        renderRows(data);
+        setStatus(`Loaded ${data.length} record(s).`, "ok");
+      } catch (err) {
+        setStatus(`Failed to load data: ${err.message}`, "err");
+      }
+    }
+
+    function downloadCsv() {
+      const url = `/api/sensors/?${getParams({ format: "csv" }).toString()}`;
+      window.open(url, "_blank", "noopener");
+      setStatus("CSV export requested.", "ok");
+    }
+
+    async function downloadJson() {
+      setStatus("Preparing JSON file...");
+      try {
+        const url = `/api/sensors/?${getParams().toString()}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = `sensor_data_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        setStatus(`JSON exported with ${data.length} record(s).`, "ok");
+      } catch (err) {
+        setStatus(`Failed to export JSON: ${err.message}`, "err");
+      }
+    }
+
+    document.getElementById("btnLoad").addEventListener("click", loadData);
+    document.getElementById("btnCsv").addEventListener("click", downloadCsv);
+    document.getElementById("btnJson").addEventListener("click", downloadJson);
+  </script>
+</body>
+</html>

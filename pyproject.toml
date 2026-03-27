@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "api_post"
+version = "0.1.0"
+description = "FastAPI endpoint for ESP32 sensor data"
+authors = ["Luis Gustavo <luisgustavoteixeira@duck.com>"]
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+fastapi = "^0.110.0"
+uvicorn = "^0.29.0"
+sqlalchemy = "^2.0.28"
+psycopg2-binary = "^2.9.9"
+pydantic = "^2.6.4"
+pydantic-settings = "^2.2.1"
+python-dotenv = "^1.0.1"
+requests = "^2.31.0"
+
+[tool.poetry.scripts]
+runserver = "app.main:start_server"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
