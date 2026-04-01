@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
       --bg: #ffffff;
@@ -104,6 +105,7 @@
       border-radius: 999px;
       padding: 10px 16px;
       font: 600 0.92rem/1 "Space Grotesk", sans-serif;
+      background: #00FF41;
       color: white;
       transition: transform 120ms ease, opacity 120ms ease;
     }
@@ -111,9 +113,9 @@
     button:hover { transform: translateY(-1px); }
     button:active { transform: translateY(0); opacity: 0.92; }
 
-    .primary { background: var(--accent); }
-    .warn { background: #39FF14; color: #000000; }
-    .ghost { background: #00FF41; color: #000000; }
+    .primary { background: #00FF41; color: white; }
+    .warn { background: #00FF41; color: white; }
+    .ghost { background: #00FF41; color: white; }
 
     .status {
       margin-top: 14px;
@@ -172,6 +174,50 @@
       .hero { padding: 14px; }
       button { width: 100%; }
     }
+
+    .chart-container {
+      margin-top: 24px;
+      border: 2px solid #e0e0e0;
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 20px;
+      display: none;
+    }
+
+    .chart-container.active {
+      display: block;
+    }
+
+    .chart-container h2 {
+      margin: 0 0 16px 0;
+      color: #00FF41;
+      font-size: 1.3rem;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      height: 400px;
+      width: 100%;
+    }
+
+    #sensorChart {
+      max-width: 100% !important;
+    }
+
+    .close-chart {
+      float: right;
+      background: #00FF41;
+      color: white;
+      border: 0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .close-chart:hover {
+      opacity: 0.9;
+    }
   </style>
 </head>
 <body>
@@ -211,19 +257,28 @@
         <button class="primary" id="btnLoad">Load Data</button>
         <button class="warn" id="btnCsv">Download CSV</button>
         <button class="ghost" id="btnJson">Download JSON</button>
+        <button class="primary" id="btnChart">View Chart</button>
       </div>
 
       <div id="status" class="status">Ready.</div>
+
+      <div id="chartContainer" class="chart-container">
+        <h2>Gráfico de dados do sensor <button class="close-chart" id="btnCloseChart">Fechar</button></h2>
+        <div class="chart-wrapper">
+          <canvas id="sensorChart"></canvas>
+        </div>
+      </div>
 
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>ID</th>
+              <th>Nº</th>
               <th>Device</th>
-              <th>tensao_shunt</th>
+              <th>Voltage Shunt</th>
               <th>Irradiance</th>
-              <th>Timestamp</th>
+              <th>Date</th>
+              <th>Time</th>
             </tr>
           </thead>
           <tbody id="rows">
@@ -263,19 +318,28 @@
 
     function renderRows(data) {
       if (!Array.isArray(data) || data.length === 0) {
-        rowsEl.innerHTML = '<tr><td colspan="5" class="mono">No records found.</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="6" class="mono">No records found.</td></tr>';
         return;
       }
 
-      rowsEl.innerHTML = data.map((row) => `
+      rowsEl.innerHTML = data.map((row) => {
+        let date = "", time = "";
+        if (row.timestamp) {
+          const ts = new Date(row.timestamp);
+          date = ts.toLocaleDateString('pt-BR');
+          time = ts.toLocaleTimeString('pt-BR');
+        }
+        return `
         <tr>
           <td class="mono">${row.id}</td>
           <td>${row.device_id}</td>
           <td>${row.tensao_shunt}</td>
           <td>${row.irradiance}</td>
-          <td class="mono">${row.timestamp ?? ""}</td>
+          <td class="mono">${date}</td>
+          <td class="mono">${time}</td>
         </tr>
-      `).join("");
+      `;
+      }).join("");
     }
 
     async function loadData() {
@@ -324,6 +388,191 @@
     document.getElementById("btnLoad").addEventListener("click", loadData);
     document.getElementById("btnCsv").addEventListener("click", downloadCsv);
     document.getElementById("btnJson").addEventListener("click", downloadJson);
+    document.getElementById("btnCloseChart").addEventListener("click", () => {
+      document.getElementById("chartContainer").classList.remove("active");
+      if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
+        window.sensorChart.destroy();
+        window.sensorChart = null;
+      }
+    });
+    
+    document.getElementById("btnChart").addEventListener("click", () => {
+      const rows = Array.from(document.querySelectorAll("#rows tr"));
+      
+      if (rows.length === 0 || rows[0].textContent.includes("No data") || rows[0].textContent.includes("No records")) {
+        setStatus("No data to display. Load data first.", "err");
+        return;
+      }
+
+const timestamps = [];
+const shuntVoltages = [];
+const irradianceValues = [];
+
+rows.forEach((row) => {
+  const cell = row.querySelector("td");
+
+  if (!cell) return;
+
+  // 🔥 pega o conteúdo completo da célula
+  const text = cell.textContent.trim();
+
+  // 🔥 divide o CSV corretamente
+  const cols = text.split(",");
+
+  // Esperado: [id, device, shunt, irradiance, time]
+  if (cols.length < 5) return;
+
+  const shunt = parseFloat(cols[2]);
+  const irrad = parseFloat(cols[3]);
+  const time = cols[4];
+
+  if (time) {
+    timestamps.push(time);
+    shuntVoltages.push(!isNaN(shunt) ? shunt : null);
+    irradianceValues.push(!isNaN(irrad) ? irrad : null);
+  }
+});
+
+if (timestamps.length === 0) {
+  setStatus("No valid data to display.", "err");
+  return;
+}
+
+// 🔥 usa tempo real
+const timeLabels = timestamps;
+
+// Mostrar container do gráfico
+const chartContainer = document.getElementById("chartContainer");
+chartContainer.classList.add("active");
+
+requestAnimationFrame(() => {
+  try {
+    // Remove gráfico anterior
+    if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
+      window.sensorChart.destroy();
+      window.sensorChart = null;
+    }
+
+    const canvas = document.getElementById("sensorChart");
+    const ctx = canvas.getContext("2d");
+
+    window.sensorChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: timeLabels,
+        datasets: [
+          {
+            label: "Irradiance (W/m²)",
+            data: irradianceValues,
+            borderColor: "#000000",
+            backgroundColor: "rgba(0, 0, 0, 0.05)",
+            tension: 0.3,
+            fill: false,
+            borderWidth: 2,
+            pointRadius: 3,
+            pointBackgroundColor: "#000000",
+            yAxisID: "y",
+            spanGaps: true,
+          },
+          {
+            label: "Voltage Shunt (V)",
+            data: shuntVoltages,
+            borderColor: "#0066FF",
+            backgroundColor: "rgba(0, 102, 255, 0.05)",
+            tension: 0.3,
+            fill: false,
+            borderWidth: 2,
+            pointRadius: 3,
+            pointBackgroundColor: "#0066FF",
+            yAxisID: "y1",
+            spanGaps: true,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: "index",
+          intersect: false,
+        },
+        plugins: {
+          legend: {
+            display: true,
+            labels: {
+              color: "#333333",
+              font: { size: 12, weight: "600" },
+              usePointStyle: true,
+            },
+          },
+        },
+        scales: {
+          x: {
+            display: true,
+            ticks: {
+              color: "#333333",
+              maxRotation: 45,
+              minRotation: 0,
+            },
+            grid: { color: "rgba(0, 0, 0, 0.1)" },
+            title: {
+              display: true,
+              text: "Time",
+              color: "#333333",
+            },
+          },
+          y: {
+            type: "linear",
+            display: true,
+            position: "left",
+            title: {
+              display: true,
+              text: "Irradiance (W/m²)",
+              color: "#000000",
+              font: { weight: "bold" },
+            },
+            ticks: { color: "#000000" },
+            grid: { color: "rgba(0, 0, 0, 0.1)" },
+          },
+          y1: {
+            type: "linear",
+            display: true,
+            position: "right",
+            min: 0,
+            title: {
+              display: true,
+              text: "Voltage Shunt (V)",
+              color: "#0066FF",
+              font: { weight: "bold" },
+            },
+            ticks: { color: "#0066FF" },
+            grid: {
+              drawOnChartArea: false,
+            },
+          },
+        },
+      },
+    });
+
+    setStatus(`Chart generated with ${timestamps.length} data point(s).`, "ok");
+    console.log("Total pontos:", timestamps.length);
+
+  } catch (error) {
+    setStatus(`Error creating chart: ${error.message}`, "err");
+    console.error("Chart error:", error);
+  }
+});
+
+    setStatus(`Chart generated with ${timestamps.length} data point(s).`, "ok");
+    console.log("Total pontos:", timestamps.length);
+
+  } 
+    catch (error) {
+    setStatus(`Error creating chart: ${error.message}`, "err");
+    console.error("Chart error:", error);
+  }
+
   </script>
 </body>
 </html>
+
