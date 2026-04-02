@@ -1,10 +1,10 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime
 from sqlalchemy.sql import func
 from .database import Base
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 def get_brazil_time():
-    return datetime.utcnow() - timedelta(hours=3)
+    return datetime.now(timezone.utc) - timedelta(hours=3)
 
 class SensorData(Base):
     __tablename__ = "sensor_data"

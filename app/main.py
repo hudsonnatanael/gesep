@@ -114,17 +114,34 @@ async def read_sensor_data(
     skip: int = 0, 
     limit: int = 100, 
     device_id: Optional[str] = None,
-    start_time: Optional[datetime] = None,
-    end_time: Optional[datetime] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
     format: str = "json"
 ):
+    # Parse datetime strings with flexible handling
+    start_dt = None
+    end_dt = None
+    
+    if start_time:
+        try:
+            # Handle both "2024-01-01T10:30" and "2024-01-01T10:30:00" formats
+            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+    
+    if end_time:
+        try:
+            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+    
     sensors = await asyncio.to_thread(
         read_sensor_data_sync,
         skip,
         limit,
         device_id,
-        start_time,
-        end_time,
+        start_dt,
+        end_dt,
     )
     
     if format.lower() == "csv":

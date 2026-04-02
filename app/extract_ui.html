@@ -134,6 +134,11 @@
       border-radius: 12px;
       overflow: auto;
       max-height: 60vh;
+      display: block;
+    }
+
+    .table-wrap.hidden {
+      display: none;
     }
 
     table {
@@ -292,6 +297,7 @@
   <script>
     const statusEl = document.getElementById("status");
     const rowsEl = document.getElementById("rows");
+    window.loadedSensorData = []; // Armazena dados carregados para usar no gráfico
 
     function setStatus(text, kind = "") {
       statusEl.textContent = text;
@@ -309,8 +315,8 @@
       params.set("skip", skip);
       params.set("limit", limit);
       if (deviceId) params.set("device_id", deviceId);
-      if (startTime) params.set("start_time", startTime);
-      if (endTime) params.set("end_time", endTime);
+      if (startTime) params.set("start_time", startTime + ":00"); // Adiciona :00 se não tiver segundos
+      if (endTime) params.set("end_time", endTime + ":00"); // Adiciona :00 se não tiver segundos
 
       Object.entries(extra).forEach(([k, v]) => params.set(k, String(v)));
       return params;
@@ -346,14 +352,25 @@
       setStatus("Loading data...");
       try {
         const url = `/api/sensors/?${getParams().toString()}`;
+        console.log("Fetching from:", url);
+        
         const response = await fetch(url);
+        console.log("Response status:", response.status);
+        
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          const errorText = await response.text();
+          console.error("Error response:", errorText);
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
+        
         const data = await response.json();
+        console.log("Data received:", data);
+        
+        window.loadedSensorData = data; // Armazena dados para uso posterior no gráfico
         renderRows(data);
         setStatus(`Loaded ${data.length} record(s).`, "ok");
       } catch (err) {
+        console.error("Load error:", err);
         setStatus(`Failed to load data: ${err.message}`, "err");
       }
     }
@@ -390,6 +407,7 @@
     document.getElementById("btnJson").addEventListener("click", downloadJson);
     document.getElementById("btnCloseChart").addEventListener("click", () => {
       document.getElementById("chartContainer").classList.remove("active");
+      document.querySelector(".table-wrap").classList.remove("hidden");
       if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
         window.sensorChart.destroy();
         window.sensorChart = null;
@@ -397,182 +415,148 @@
     });
     
     document.getElementById("btnChart").addEventListener("click", () => {
-      const rows = Array.from(document.querySelectorAll("#rows tr"));
-      
-      if (rows.length === 0 || rows[0].textContent.includes("No data") || rows[0].textContent.includes("No records")) {
+      if (!window.loadedSensorData || window.loadedSensorData.length === 0) {
         setStatus("No data to display. Load data first.", "err");
         return;
       }
 
-const timestamps = [];
-const shuntVoltages = [];
-const irradianceValues = [];
+      const timestamps = [];
+      const shuntVoltages = [];
+      const irradianceValues = [];
 
-rows.forEach((row) => {
-  const cell = row.querySelector("td");
+      window.loadedSensorData.forEach((row) => {
+        const shunt = parseFloat(row.tensao_shunt);
+        const irrad = parseFloat(row.irradiance);
+        
+        // Adiciona ponto se houver irradiância válida
+        if (!isNaN(irrad)) {
+          timestamps.push(row.timestamp);
+          shuntVoltages.push(!isNaN(shunt) ? shunt : null);
+          irradianceValues.push(irrad);
+        }
+      });
 
-  if (!cell) return;
+      if (timestamps.length === 0) {
+        setStatus("No valid data to display.", "err");
+        return;
+      }
 
-  // 🔥 pega o conteúdo completo da célula
-  const text = cell.textContent.trim();
+      // Criar rótulos de tempo com 10s por ponto
+      const timeLabels = timestamps.map((_, index) => `${index * 10}s`);
 
-  // 🔥 divide o CSV corretamente
-  const cols = text.split(",");
+      // Mostrar container do gráfico e esconder tabela
+      const chartContainer = document.getElementById("chartContainer");
+      const tableWrap = document.querySelector(".table-wrap");
+      chartContainer.classList.add("active");
+      tableWrap.classList.add("hidden");
 
-  // Esperado: [id, device, shunt, irradiance, time]
-  if (cols.length < 5) return;
+      requestAnimationFrame(() => {
+        try {
+          if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
+            window.sensorChart.destroy();
+            window.sensorChart = null;
+          }
 
-  const shunt = parseFloat(cols[2]);
-  const irrad = parseFloat(cols[3]);
-  const time = cols[4];
-
-  if (time) {
-    timestamps.push(time);
-    shuntVoltages.push(!isNaN(shunt) ? shunt : null);
-    irradianceValues.push(!isNaN(irrad) ? irrad : null);
-  }
-});
-
-if (timestamps.length === 0) {
-  setStatus("No valid data to display.", "err");
-  return;
-}
-
-// 🔥 usa tempo real
-const timeLabels = timestamps;
-
-// Mostrar container do gráfico
-const chartContainer = document.getElementById("chartContainer");
-chartContainer.classList.add("active");
-
-requestAnimationFrame(() => {
-  try {
-    // Remove gráfico anterior
-    if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
-      window.sensorChart.destroy();
-      window.sensorChart = null;
-    }
-
-    const canvas = document.getElementById("sensorChart");
-    const ctx = canvas.getContext("2d");
-
-    window.sensorChart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels: timeLabels,
-        datasets: [
-          {
-            label: "Irradiance (W/m²)",
-            data: irradianceValues,
-            borderColor: "#000000",
-            backgroundColor: "rgba(0, 0, 0, 0.05)",
-            tension: 0.3,
-            fill: false,
-            borderWidth: 2,
-            pointRadius: 3,
-            pointBackgroundColor: "#000000",
-            yAxisID: "y",
-            spanGaps: true,
-          },
-          {
-            label: "Voltage Shunt (V)",
-            data: shuntVoltages,
-            borderColor: "#0066FF",
-            backgroundColor: "rgba(0, 102, 255, 0.05)",
-            tension: 0.3,
-            fill: false,
-            borderWidth: 2,
-            pointRadius: 3,
-            pointBackgroundColor: "#0066FF",
-            yAxisID: "y1",
-            spanGaps: true,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {
-          mode: "index",
-          intersect: false,
-        },
-        plugins: {
-          legend: {
-            display: true,
-            labels: {
-              color: "#333333",
-              font: { size: 12, weight: "600" },
-              usePointStyle: true,
+          const canvas = document.getElementById("sensorChart");
+          const ctx = canvas.getContext("2d");
+          
+          window.sensorChart = new Chart(ctx, {
+            type: "line",
+            data: {
+              labels: timeLabels,
+              datasets: [
+                {
+                  label: "Irradiance (W/m²)",
+                  data: irradianceValues,
+                  borderColor: "#000000",
+                  backgroundColor: "rgba(0, 0, 0, 0.05)",
+                  tension: 0.3,
+                  fill: false,
+                  borderWidth: 2,
+                  pointRadius: 4,
+                  pointBackgroundColor: "#000000",
+                  yAxisID: "y",
+                },
+                {
+                  label: "Voltage Shunt (V)",
+                  data: shuntVoltages,
+                  borderColor: "#0066FF",
+                  backgroundColor: "rgba(0, 102, 255, 0.05)",
+                  tension: 0.3,
+                  fill: false,
+                  borderWidth: 2,
+                  pointRadius: 4,
+                  pointBackgroundColor: "#0066FF",
+                  yAxisID: "y1",
+                },
+              ],
             },
-          },
-        },
-        scales: {
-          x: {
-            display: true,
-            ticks: {
-              color: "#333333",
-              maxRotation: 45,
-              minRotation: 0,
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: {
+                mode: "index",
+                intersect: false,
+              },
+              plugins: {
+                legend: {
+                  display: true,
+                  labels: {
+                    color: "#333333",
+                    font: { size: 12, weight: "600" },
+                    usePointStyle: true,
+                  },
+                },
+              },
+              scales: {
+                x: {
+                  display: true,
+                  ticks: { color: "#333333", maxRotation: 45, minRotation: 0, stepSize: 10 },
+                  grid: { color: "rgba(0, 0, 0, 0.1)" },
+                  title: { display: true, text: "Time (s)", color: "#333333" },
+                },
+                y: {
+                  type: "linear",
+                  display: true,
+                  position: "left",
+                  min: 112,
+                  max: 1225,
+                  title: {
+                    display: true,
+                    text: "Irradiance (W/m²)",
+                    color: "#000000",
+                    font: { weight: "bold" },
+                  },
+                  ticks: { color: "#000000" },
+                  grid: { color: "rgba(0, 0, 0, 0.1)" },
+                },
+                y1: {
+                  type: "linear",
+                  display: true,
+                  position: "right",
+                  min: 0.000312,
+                  max: 0.0075,
+                  title: {
+                    display: true,
+                    text: "Voltage Shunt (V)",
+                    color: "#0066FF",
+                    font: { weight: "bold" },
+                  },
+                  ticks: { color: "#0066FF" },
+                  grid: { drawOnChartArea: false },
+                },
+              },
             },
-            grid: { color: "rgba(0, 0, 0, 0.1)" },
-            title: {
-              display: true,
-              text: "Time",
-              color: "#333333",
-            },
-          },
-          y: {
-            type: "linear",
-            display: true,
-            position: "left",
-            title: {
-              display: true,
-              text: "Irradiance (W/m²)",
-              color: "#000000",
-              font: { weight: "bold" },
-            },
-            ticks: { color: "#000000" },
-            grid: { color: "rgba(0, 0, 0, 0.1)" },
-          },
-          y1: {
-            type: "linear",
-            display: true,
-            position: "right",
-            min: 0,
-            title: {
-              display: true,
-              text: "Voltage Shunt (V)",
-              color: "#0066FF",
-              font: { weight: "bold" },
-            },
-            ticks: { color: "#0066FF" },
-            grid: {
-              drawOnChartArea: false,
-            },
-          },
-        },
-      },
+          });
+
+          setStatus(`Chart generated with ${timestamps.length} data point(s).`, "ok");
+          console.log("Chart rendered successfully");
+        } catch (error) {
+          setStatus(`Error creating chart: ${error.message}`, "err");
+          console.error("Chart error:", error);
+        }
+      });
     });
-
-    setStatus(`Chart generated with ${timestamps.length} data point(s).`, "ok");
-    console.log("Total pontos:", timestamps.length);
-
-  } catch (error) {
-    setStatus(`Error creating chart: ${error.message}`, "err");
-    console.error("Chart error:", error);
-  }
-});
-
-    setStatus(`Chart generated with ${timestamps.length} data point(s).`, "ok");
-    console.log("Total pontos:", timestamps.length);
-
-  } 
-    catch (error) {
-    setStatus(`Error creating chart: ${error.message}`, "err");
-    console.error("Chart error:", error);
-  }
-
   </script>
 </body>
 </html>
-
