@@ -369,6 +369,14 @@
         window.loadedSensorData = data; // Armazena dados para uso posterior no gráfico
         renderRows(data);
         setStatus(`Loaded ${data.length} record(s).`, "ok");
+        
+        // Auto-scroll to bottom to see newest data
+        setTimeout(() => {
+          const tableWrap = document.querySelector(".table-wrap");
+          if (tableWrap) {
+            tableWrap.scrollTop = tableWrap.scrollHeight;
+          }
+        }, 100);
       } catch (err) {
         console.error("Load error:", err);
         setStatus(`Failed to load data: ${err.message}`, "err");
@@ -402,161 +410,306 @@
       }
     }
 
-    document.getElementById("btnLoad").addEventListener("click", loadData);
-    document.getElementById("btnCsv").addEventListener("click", downloadCsv);
-    document.getElementById("btnJson").addEventListener("click", downloadJson);
-    document.getElementById("btnCloseChart").addEventListener("click", () => {
-      document.getElementById("chartContainer").classList.remove("active");
-      document.querySelector(".table-wrap").classList.remove("hidden");
-      if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
-        window.sensorChart.destroy();
-        window.sensorChart = null;
-      }
-    });
-    
-    document.getElementById("btnChart").addEventListener("click", () => {
-      if (!window.loadedSensorData || window.loadedSensorData.length === 0) {
-        setStatus("No data to display. Load data first.", "err");
-        return;
-      }
-
-      const timestamps = [];
-      const shuntVoltages = [];
-      const irradianceValues = [];
-
-      window.loadedSensorData.forEach((row) => {
-        const shunt = parseFloat(row.tensao_shunt);
-        const irrad = parseFloat(row.irradiance);
-        
-        // Adiciona ponto se houver irradiância válida
-        if (!isNaN(irrad)) {
-          timestamps.push(row.timestamp);
-          shuntVoltages.push(!isNaN(shunt) ? shunt : null);
-          irradianceValues.push(irrad);
+    // Register event listeners with error handling
+    console.log("📋 Registering event listeners...");
+    try {
+      document.getElementById("btnLoad").addEventListener("click", () => {
+        console.log("🖱️ Load Data clicked");
+        loadData().catch(err => console.error("Load error:", err));
+      });
+      
+      document.getElementById("btnCsv").addEventListener("click", () => {
+        console.log("🖱️ Download CSV clicked");
+        downloadCsv();
+      });
+      
+      document.getElementById("btnJson").addEventListener("click", () => {
+        console.log("🖱️ Download JSON clicked");
+        downloadJson().catch(err => console.error("JSON error:", err));
+      });
+      
+      document.getElementById("btnCloseChart").addEventListener("click", () => {
+        console.log("🖱️ Close Chart clicked");
+        document.getElementById("chartContainer").classList.remove("active");
+        document.querySelector(".table-wrap").classList.remove("hidden");
+        if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
+          window.sensorChart.destroy();
+          window.sensorChart = null;
         }
       });
+      
+      document.getElementById("btnChart").addEventListener("click", () => {
+        console.log("🖱️ View Chart clicked");
+        if (!window.loadedSensorData || window.loadedSensorData.length === 0) {
+          setStatus("No data to display. Load data first.", "err");
+          return;
+        }
 
-      if (timestamps.length === 0) {
-        setStatus("No valid data to display.", "err");
-        return;
-      }
+        const timestamps = [];
+        const shuntVoltages = [];
+        const irradianceValues = [];
 
-      // Criar rótulos de tempo com 10s por ponto
-      const timeLabels = timestamps.map((_, index) => `${index * 10}s`);
-
-      // Mostrar container do gráfico e esconder tabela
-      const chartContainer = document.getElementById("chartContainer");
-      const tableWrap = document.querySelector(".table-wrap");
-      chartContainer.classList.add("active");
-      tableWrap.classList.add("hidden");
-
-      requestAnimationFrame(() => {
-        try {
-          if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
-            window.sensorChart.destroy();
-            window.sensorChart = null;
-          }
-
-          const canvas = document.getElementById("sensorChart");
-          const ctx = canvas.getContext("2d");
+        window.loadedSensorData.forEach((row) => {
+          const shunt = parseFloat(row.tensao_shunt);
+          const irrad = parseFloat(row.irradiance);
           
-          window.sensorChart = new Chart(ctx, {
-            type: "line",
-            data: {
-              labels: timeLabels,
-              datasets: [
-                {
-                  label: "Irradiance (W/m²)",
-                  data: irradianceValues,
-                  borderColor: "#000000",
-                  backgroundColor: "rgba(0, 0, 0, 0.05)",
-                  tension: 0.3,
-                  fill: false,
-                  borderWidth: 2,
-                  pointRadius: 4,
-                  pointBackgroundColor: "#000000",
-                  yAxisID: "y",
-                },
-                {
-                  label: "Voltage Shunt (V)",
-                  data: shuntVoltages,
-                  borderColor: "#0066FF",
-                  backgroundColor: "rgba(0, 102, 255, 0.05)",
-                  tension: 0.3,
-                  fill: false,
-                  borderWidth: 2,
-                  pointRadius: 4,
-                  pointBackgroundColor: "#0066FF",
-                  yAxisID: "y1",
-                },
-              ],
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              interaction: {
-                mode: "index",
-                intersect: false,
-              },
-              plugins: {
-                legend: {
-                  display: true,
-                  labels: {
-                    color: "#333333",
-                    font: { size: 12, weight: "600" },
-                    usePointStyle: true,
-                  },
-                },
-              },
-              scales: {
-                x: {
-                  display: true,
-                  ticks: { color: "#333333", maxRotation: 45, minRotation: 0, stepSize: 10 },
-                  grid: { color: "rgba(0, 0, 0, 0.1)" },
-                  title: { display: true, text: "Time (s)", color: "#333333" },
-                },
-                y: {
-                  type: "linear",
-                  display: true,
-                  position: "left",
-                  min: 112,
-                  max: 1225,
-                  title: {
-                    display: true,
-                    text: "Irradiance (W/m²)",
-                    color: "#000000",
-                    font: { weight: "bold" },
-                  },
-                  ticks: { color: "#000000" },
-                  grid: { color: "rgba(0, 0, 0, 0.1)" },
-                },
-                y1: {
-                  type: "linear",
-                  display: true,
-                  position: "right",
-                  min: 0.000312,
-                  max: 0.0075,
-                  title: {
-                    display: true,
-                    text: "Voltage Shunt (V)",
-                    color: "#0066FF",
-                    font: { weight: "bold" },
-                  },
-                  ticks: { color: "#0066FF" },
-                  grid: { drawOnChartArea: false },
-                },
-              },
-            },
-          });
+          if (!isNaN(irrad)) {
+            timestamps.push(row.timestamp);
+            shuntVoltages.push(!isNaN(shunt) ? shunt : null);
+            irradianceValues.push(irrad);
+          }
+        });
 
-          setStatus(`Chart generated with ${timestamps.length} data point(s).`, "ok");
-          console.log("Chart rendered successfully");
-        } catch (error) {
-          setStatus(`Error creating chart: ${error.message}`, "err");
-          console.error("Chart error:", error);
+        if (timestamps.length === 0) {
+          setStatus("No valid data to display.", "err");
+          return;
         }
+
+        const timeLabels = timestamps.map((_, index) => `${index * 10}s`);
+        const chartContainer = document.getElementById("chartContainer");
+        const tableWrap = document.querySelector(".table-wrap");
+        chartContainer.classList.add("active");
+        tableWrap.classList.add("hidden");
+
+        requestAnimationFrame(() => {
+          try {
+            if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
+              window.sensorChart.destroy();
+              window.sensorChart = null;
+            }
+
+            const canvas = document.getElementById("sensorChart");
+            const ctx = canvas.getContext("2d");
+            
+            window.sensorChart = new Chart(ctx, {
+              type: "line",
+              data: {
+                labels: timeLabels,
+                datasets: [
+                  {
+                    label: "Irradiance (W/m²)",
+                    data: irradianceValues,
+                    borderColor: "#000000",
+                    backgroundColor: "rgba(0, 0, 0, 0.05)",
+                    tension: 0.3,
+                    fill: false,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointBackgroundColor: "#000000",
+                    yAxisID: "y",
+                  },
+                  {
+                    label: "Voltage Shunt (V)",
+                    data: shuntVoltages,
+                    borderColor: "#0066FF",
+                    backgroundColor: "rgba(0, 102, 255, 0.05)",
+                    tension: 0.3,
+                    fill: false,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointBackgroundColor: "#0066FF",
+                    yAxisID: "y1",
+                  },
+                ],
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                  mode: "index",
+                  intersect: false,
+                },
+                plugins: {
+                  legend: {
+                    display: true,
+                    labels: {
+                      color: "#333333",
+                      font: { size: 12, weight: "600" },
+                      usePointStyle: true,
+                    },
+                  },
+                },
+                scales: {
+                  x: {
+                    display: true,
+                    ticks: { color: "#333333", maxRotation: 45, minRotation: 0, stepSize: 10 },
+                    grid: { color: "rgba(0, 0, 0, 0.1)" },
+                    title: { display: true, text: "Time (s)", color: "#333333" },
+                  },
+                  y: {
+                    type: "linear",
+                    display: true,
+                    position: "left",
+                    min: 112,
+                    max: 1225,
+                    title: {
+                      display: true,
+                      text: "Irradiance (W/m²)",
+                      color: "#000000",
+                      font: { weight: "bold" },
+                    },
+                    ticks: { color: "#000000" },
+                    grid: { color: "rgba(0, 0, 0, 0.1)" },
+                  },
+                  y1: {
+                    type: "linear",
+                    display: true,
+                    position: "right",
+                    min: 0.000312,
+                    max: 0.0075,
+                    title: {
+                      display: true,
+                      text: "Voltage Shunt (V)",
+                      color: "#0066FF",
+                      font: { weight: "bold" },
+                    },
+                    ticks: { color: "#0066FF" },
+                    grid: { drawOnChartArea: false },
+                  },
+                },
+              },
+            });
+
+            setStatus(`Chart generated with ${timestamps.length} data point(s).`, "ok");
+            console.log("✅ Chart rendered successfully");
+          } catch (error) {
+            setStatus(`Error creating chart: ${error.message}`, "err");
+            console.error("❌ Chart error:", error);
+          }
+        });
       });
-    });
+      
+      console.log("✅ All event listeners registered");
+    } catch (err) {
+      console.error("❌ Error registering listeners:", err);
+    }
+
+    // ===== Real-time SSE streaming =====
+    function addRowToTable(row) {
+      const tbody = document.getElementById("rows");
+      console.log("📥 Adding row to table:", row);
+      
+      // Remove "No records found" message if present
+      if (tbody.querySelector("tr td[colspan='6']")) {
+        tbody.innerHTML = "";
+      }
+      
+      let date = "", time = "";
+      if (row.timestamp) {
+        const ts = new Date(row.timestamp);
+        date = ts.toLocaleDateString('pt-BR');
+        time = ts.toLocaleTimeString('pt-BR');
+      }
+      
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="mono">${row.id}</td>
+        <td>${row.device_id}</td>
+        <td>${row.tensao_shunt.toFixed(6)}</td>
+        <td>${row.irradiance.toFixed(2)}</td>
+        <td class="mono">${date}</td>
+        <td class="mono">${time}</td>
+      `;
+      
+      // Add to END (newest last - chronological order)
+      tbody.appendChild(tr);
+      
+      // Keep only last 200 rows to avoid memory issues
+      while (tbody.children.length > 200) {
+        tbody.removeChild(tbody.firstChild);
+      }
+      
+      // Auto-scroll to bottom to see newest data
+      const tableWrap = document.querySelector(".table-wrap");
+      if (tableWrap) {
+        tableWrap.scrollTop = tableWrap.scrollHeight;
+      }
+    }
+
+    function startRealTimeStream() {
+      // Use relative URL to avoid CORS/scheme issues
+      const streamUrl = "/api/sensors/stream";
+      console.log("🚀 Starting real-time stream...");
+      console.log("🌐 Stream URL:", streamUrl);
+      console.log("🌐 Window origin:", window.location.origin);
+      
+      try {
+        const eventSource = new EventSource(streamUrl);
+        let messageCount = 0;
+        let connected = false;
+        
+        eventSource.onopen = () => {
+          console.log("✅ SSE connection OPENED");
+          connected = true;
+          window.sseConnected = true;
+          setStatus("✅ Conectado ao stream de tempo real", "ok");
+        };
+        
+        eventSource.onmessage = (event) => {
+          try {
+            messageCount++;
+            console.log(`📨 Message #${messageCount}:`, event.data.substring(0, 100));
+            
+            if (event.data.trim() === "") {
+              console.log("💓 Heartbeat received");
+              return;
+            }
+            
+            const row = JSON.parse(event.data);
+            console.log("✅ Parsed successfully:", row);
+            addRowToTable(row);
+            // Add to END of array (maintain chronological order)
+            window.loadedSensorData.push(row);
+            setStatus(`📊 ${row.device_id} - ${messageCount} msgs`, "ok");
+          } catch (err) {
+            console.error("❌ Parse error:", err.message, "Data:", event.data);
+          }
+        };
+        
+        eventSource.onerror = (err) => {
+          connected = false;
+          window.sseConnected = false;
+          console.error("❌ SSE error:", err);
+          console.error("ReadyState:", eventSource.readyState);
+          setStatus("⚠️ Conexão perdida - reconectando...", "err");
+          eventSource.close();
+          
+          setTimeout(() => {
+            console.log("🔄 Tentando reconectar...");
+            startRealTimeStream();
+          }, 3000);
+        };
+        
+        window.realTimeEventSource = eventSource;
+        setStatus("📡 Conectando ao stream...", "ok");
+      } catch (err) {
+        console.error("❌ Failed to create EventSource:", err);
+        setStatus(`❌ Erro: ${err.message}`, "err");
+        window.sseConnected = false;
+      }
+    }
+
+    // Start real-time stream when page loads
+    console.log("🎯 Page initialized - starting stream");
+    
+    // Initialize window state
+    window.sseConnected = false;
+    window.loadedSensorData = [];
+    
+    // Wrap in try-catch so errors don't break the page
+    try {
+      // 1. Connect to SSE stream
+      setTimeout(() => {
+        try {
+          startRealTimeStream();
+        } catch (err) {
+          console.error("❌ SSE init failed:", err);
+          setStatus("⚠️ Modo sem stream real-time", "err");
+        }
+      }, 300);
+    } catch (err) {
+      console.error("❌ Fatal error:", err);
+    }
   </script>
 </body>
 </html>

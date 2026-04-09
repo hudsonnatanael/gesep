@@ -15,6 +15,7 @@ pydantic = "^2.6.4"
 pydantic-settings = "^2.2.1"
 python-dotenv = "^1.0.1"
 requests = "^2.31.0"
+pytz = "^2026.1.post1"
 
 [tool.poetry.scripts]
 runserver = "app.main:start_server"
