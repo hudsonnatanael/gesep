@@ -47,14 +47,25 @@ EXTRACT_UI_PATH = Path(__file__).with_name("extract_ui.html")
 async def broadcast_sensor(data: dict) -> None:
     """Broadcast new sensor data to all connected SSE clients"""
     async with sse_lock:
-        logger.info(f"🔊 Broadcasting to {len(sse_clients)} SSE clients: {data}")
+        logger.info(f"🔊 Broadcasting to {len(sse_clients)} SSE clients")
+        logger.debug(f"   Data: {data}")
+        
+        failed_clients = []
         for queue in sse_clients[:]:
             try:
                 queue.put_nowait(data)
                 logger.debug(f"✅ Data sent to queue")
             except asyncio.QueueFull:
                 logger.warning(f"❌ Queue full, removing client")
-                sse_clients.remove(queue)
+                failed_clients.append(queue)
+            except Exception as e:
+                logger.error(f"❌ Error sending to queue: {e}")
+                failed_clients.append(queue)
+        
+        # Remove failed clients
+        for client in failed_clients:
+            if client in sse_clients:
+                sse_clients.remove(client)
 
 
 def flush_sensor_batch_sync(batch: list[dict]) -> list[dict]:
@@ -96,7 +107,7 @@ def read_sensor_data_sync(
     db = database.SessionLocal()
     try:
         query = db.query(models.SensorData)
-po        
+        
         # Log total records
         total_records = query.count()
         logger.info(f"  📊 Total records in DB: {total_records}")
@@ -146,9 +157,17 @@ async def stream_sensor_data():
             while True:
                 try:
                     data = await asyncio.wait_for(queue.get(), timeout=55)
-                    json_data = json.dumps(data)
-                    logger.debug(f"📨 Sending SSE data: {json_data}")
-                    yield f"data: {json_data}\n\n"
+                    try:
+                        json_data = json.dumps(data)
+                        logger.debug(f"📨 Sending SSE data: {json_data}")
+                        yield f"data: {json_data}\n\n"
+                    except TypeError as e:
+                        logger.error(f"❌ JSON serialization error: {e}, data type: {type(data)}, data: {data}")
+                        # Try to fix timestamp serialization
+                        if isinstance(data, dict) and "timestamp" in data:
+                            data["timestamp"] = str(data["timestamp"])
+                            json_data = json.dumps(data)
+                            yield f"data: {json_data}\n\n"
                 except asyncio.TimeoutError:
                     yield ": heartbeat\n\n"
         except asyncio.CancelledError:
@@ -174,16 +193,19 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
     batch_to_flush: list[dict] = []
     buffered_count = 0
     received_at = models.get_brazil_time()
+    
+    # Prepare data for buffering
+    data_to_buffer = {
+        "device_id": sensor_data.device_id,
+        "tensao_shunt": sensor_data.tensao_shunt,
+        "irradiance": sensor_data.irradiance,
+        "timestamp": received_at,
+    }
 
     async with buffer_lock:
-        sensor_buffer.append(
-            {
-                "device_id": sensor_data.device_id,
-                "tensao_shunt": sensor_data.tensao_shunt,
-                "irradiance": sensor_data.irradiance,
-                "timestamp": received_at,
-            }
-        )
+        sensor_buffer.append(data_to_buffer)
+        
+        # Check if buffer should be flushed
         if len(sensor_buffer) >= BUFFER_SIZE:
             batch_to_flush = sensor_buffer[:]
             sensor_buffer.clear()
@@ -193,6 +215,8 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
     inserted_count = 0
     flushed = False
     saved_data = []
+    
+    # Flush batch to database if buffer is full
     if batch_to_flush:
         try:
             saved_data = await asyncio.to_thread(flush_sensor_batch_sync, batch_to_flush)
@@ -209,6 +233,23 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
                 sensor_buffer[0:0] = batch_to_flush
                 buffered_count = len(sensor_buffer)
             raise HTTPException(status_code=500, detail="Failed to flush buffered measurements to database")
+    
+    # Also broadcast the current data immediately to SSE for real-time visualization
+    # (even if not yet saved to database - frontend preview)
+    if len(sse_clients) > 0:
+        # Convert timestamp to ISO string to ensure JSON serializability
+        timestamp_str = received_at.isoformat() if hasattr(received_at, 'isoformat') else str(received_at)
+        
+        preview_data = {
+            "id": -1,  # Temporary ID for preview
+            "device_id": data_to_buffer["device_id"],
+            "tensao_shunt": float(data_to_buffer["tensao_shunt"]),
+            "irradiance": float(data_to_buffer["irradiance"]),
+            "timestamp": timestamp_str,
+        }
+        logger.debug(f"🔄 Preview data prepared: {preview_data}")
+        await broadcast_sensor(preview_data)
+        logger.debug(f"📡 Broadcasted preview data to {len(sse_clients)} SSE clients")
 
     return {
         "message": "Measurement buffered",
@@ -282,6 +323,9 @@ async def debug_latest():
             logger.info(f"  - ID: {r.id}, Device: {r.device_id}, TS: {r.timestamp}")
         return {
             "total": len(records),
+            "sse_clients_connected": len(sse_clients),
+            "buffer_size": len(sensor_buffer),
+            "server_time": models.get_brazil_time().isoformat(),
             "records": [
                 {
                     "id": r.id,
@@ -292,6 +336,29 @@ async def debug_latest():
                 }
                 for r in records
             ]
+        }
+    finally:
+        db.close()
+
+@app.get("/api/debug/system-status")
+async def system_status():
+    """Get system status for debugging"""
+    db = database.SessionLocal()
+    try:
+        total_records = db.query(models.SensorData).count()
+        latest = db.query(models.SensorData).order_by(models.SensorData.id.desc()).first()
+        
+        latest_time = latest.timestamp.isoformat() if latest else None
+        current_time = models.get_brazil_time()
+        
+        return {
+            "status": "OK",
+            "sse_clients_connected": len(sse_clients),
+            "buffered_records": len(sensor_buffer),
+            "database_total_records": total_records,
+            "latest_record_time": latest_time,
+            "current_server_time": current_time.isoformat(),
+            "timezone": "America/Sao_Paulo",
         }
     finally:
         db.close()

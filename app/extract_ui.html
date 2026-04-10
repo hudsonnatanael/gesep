@@ -328,7 +328,7 @@
         return;
       }
 
-      rowsEl.innerHTML = data.map((row) => {
+      rowsEl.innerHTML = data.map((row, index) => {
         let date = "", time = "";
         if (row.timestamp) {
           const ts = new Date(row.timestamp);
@@ -337,7 +337,7 @@
         }
         return `
         <tr>
-          <td class="mono">${row.id}</td>
+          <td class="mono">${index + 1}</td>
           <td>${row.device_id}</td>
           <td>${row.tensao_shunt}</td>
           <td>${row.irradiance}</td>
@@ -367,6 +367,17 @@
         console.log("Data received:", data);
         
         window.loadedSensorData = data; // Armazena dados para uso posterior no gráfico
+        
+        // Close chart if open
+        const chartContainer = document.getElementById("chartContainer");
+        const tableWrap = document.querySelector(".table-wrap");
+        chartContainer.classList.remove("active");
+        tableWrap.classList.remove("hidden");
+        if (window.sensorChart && typeof window.sensorChart.destroy === "function") {
+          window.sensorChart.destroy();
+          window.sensorChart = null;
+        }
+        
         renderRows(data);
         setStatus(`Loaded ${data.length} record(s).`, "ok");
         
@@ -468,6 +479,8 @@
         const timeLabels = timestamps.map((_, index) => `${index * 10}s`);
         const chartContainer = document.getElementById("chartContainer");
         const tableWrap = document.querySelector(".table-wrap");
+        
+        // Hide table and show chart
         chartContainer.classList.add("active");
         tableWrap.classList.add("hidden");
 
@@ -584,109 +597,17 @@
       console.error("❌ Error registering listeners:", err);
     }
 
-    // ===== Real-time SSE streaming =====
+    // ===== Real-time SSE streaming (DISABLED) =====
     function addRowToTable(row) {
-      const tbody = document.getElementById("rows");
-      console.log("📥 Adding row to table:", row);
-      
-      // Remove "No records found" message if present
-      if (tbody.querySelector("tr td[colspan='6']")) {
-        tbody.innerHTML = "";
-      }
-      
-      let date = "", time = "";
-      if (row.timestamp) {
-        const ts = new Date(row.timestamp);
-        date = ts.toLocaleDateString('pt-BR');
-        time = ts.toLocaleTimeString('pt-BR');
-      }
-      
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td class="mono">${row.id}</td>
-        <td>${row.device_id}</td>
-        <td>${row.tensao_shunt.toFixed(6)}</td>
-        <td>${row.irradiance.toFixed(2)}</td>
-        <td class="mono">${date}</td>
-        <td class="mono">${time}</td>
-      `;
-      
-      // Add to END (newest last - chronological order)
-      tbody.appendChild(tr);
-      
-      // Keep only last 200 rows to avoid memory issues
-      while (tbody.children.length > 200) {
-        tbody.removeChild(tbody.firstChild);
-      }
-      
-      // Auto-scroll to bottom to see newest data
-      const tableWrap = document.querySelector(".table-wrap");
-      if (tableWrap) {
-        tableWrap.scrollTop = tableWrap.scrollHeight;
-      }
+      // Real-time stream disabled - showing only selected period
+      console.log("ℹ️ Real-time stream disabled - showing only selected period data");
     }
 
     function startRealTimeStream() {
-      // Use relative URL to avoid CORS/scheme issues
-      const streamUrl = "/api/sensors/stream";
-      console.log("🚀 Starting real-time stream...");
-      console.log("🌐 Stream URL:", streamUrl);
-      console.log("🌐 Window origin:", window.location.origin);
-      
-      try {
-        const eventSource = new EventSource(streamUrl);
-        let messageCount = 0;
-        let connected = false;
-        
-        eventSource.onopen = () => {
-          console.log("✅ SSE connection OPENED");
-          connected = true;
-          window.sseConnected = true;
-          setStatus("✅ Conectado ao stream de tempo real", "ok");
-        };
-        
-        eventSource.onmessage = (event) => {
-          try {
-            messageCount++;
-            console.log(`📨 Message #${messageCount}:`, event.data.substring(0, 100));
-            
-            if (event.data.trim() === "") {
-              console.log("💓 Heartbeat received");
-              return;
-            }
-            
-            const row = JSON.parse(event.data);
-            console.log("✅ Parsed successfully:", row);
-            addRowToTable(row);
-            // Add to END of array (maintain chronological order)
-            window.loadedSensorData.push(row);
-            setStatus(`📊 ${row.device_id} - ${messageCount} msgs`, "ok");
-          } catch (err) {
-            console.error("❌ Parse error:", err.message, "Data:", event.data);
-          }
-        };
-        
-        eventSource.onerror = (err) => {
-          connected = false;
-          window.sseConnected = false;
-          console.error("❌ SSE error:", err);
-          console.error("ReadyState:", eventSource.readyState);
-          setStatus("⚠️ Conexão perdida - reconectando...", "err");
-          eventSource.close();
-          
-          setTimeout(() => {
-            console.log("🔄 Tentando reconectar...");
-            startRealTimeStream();
-          }, 3000);
-        };
-        
-        window.realTimeEventSource = eventSource;
-        setStatus("📡 Conectando ao stream...", "ok");
-      } catch (err) {
-        console.error("❌ Failed to create EventSource:", err);
-        setStatus(`❌ Erro: ${err.message}`, "err");
-        window.sseConnected = false;
-      }
+      // Real-time streaming is DISABLED
+      console.log("ℹ️ Real-time streaming is disabled");
+      console.log("ℹ️ To view real-time data, use 'Load Data' button to refresh");
+      window.sseConnected = false;
     }
 
     // Start real-time stream when page loads
@@ -698,15 +619,17 @@
     
     // Wrap in try-catch so errors don't break the page
     try {
-      // 1. Connect to SSE stream
+      // 1. Load initial data
       setTimeout(() => {
         try {
-          startRealTimeStream();
+          console.log("📊 Loading initial data...");
+          loadData();
         } catch (err) {
-          console.error("❌ SSE init failed:", err);
-          setStatus("⚠️ Modo sem stream real-time", "err");
+          console.error("❌ Initial load failed:", err);
         }
-      }, 300);
+      }, 200);
+      
+      // Real-time stream is DISABLED - showing only selected period data
     } catch (err) {
       console.error("❌ Fatal error:", err);
     }
