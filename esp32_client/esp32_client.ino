@@ -6,9 +6,9 @@
 // =========================
 const char* ssid = "AP-GESEP02";
 const char* password = "g3s3pufv";
-
-const char* serverName = "http://192.168.0.15:8000/api/sensors/";
-
+  
+const char* serverName = "http://192.168.0.8:8000/api/sensors/";
+.
 // =========================
 // 🔌 PINOS
 // =========================
