@@ -12,9 +12,18 @@ import logging
 from pathlib import Path
 from . import models, schemas, database
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging with detailed format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Log startup
+logger.info("="*60)
+logger.info("🚀 SERVIDOR GESEP INICIANDO")
+logger.info(f"📂 Banco de dados: {database.SQLALCHEMY_DATABASE_URL}")
+logger.info("="*60)
 
 # Create tables if they don't exist
 models.Base.metadata.create_all(bind=database.engine)
@@ -33,6 +42,20 @@ app.add_middleware(
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers
 )
+
+# Health check endpoint
+@app.get("/api/health")
+async def health_check():
+    """Quick health check endpoint"""
+    logger.info("🏥 Health check da ESP32 recebido!")
+    return {"status": "ok", "server": "GESEP Ready"}
+
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    logger.info("✅ Servidor pronto para receber dados da ESP32!")
+    logger.info(f"📍 Acesse: http://localhost:8000/extract")
+    logger.info(f"🔌 API ESP32: http://localhost:8000/api/sensors/")
 
 BUFFER_SIZE = 12
 sensor_buffer: list[dict] = []
@@ -419,3 +442,26 @@ async def read_sensor_data(
         )
         
     return sensors
+
+@app.get("/api/sensors/count")
+async def count_sensors():
+    """Get total number of sensor records in database"""
+    db = database.SessionLocal()
+    try:
+        total = db.query(models.SensorData).count()
+        latest = db.query(models.SensorData).order_by(models.SensorData.timestamp.desc()).first()
+        
+        response = {
+            "total_records": total,
+            "latest_timestamp": latest.timestamp.isoformat() if latest else None,
+            "latest_device": latest.device_id if latest else None,
+            "buffer_count": len(sensor_buffer),
+            "connected_clients": len(sse_clients)
+        }
+        
+        if total > 0:
+            logger.info(f"✅ Dados encontrados! Total: {total} registros")
+        
+        return response
+    finally:
+        db.close()
