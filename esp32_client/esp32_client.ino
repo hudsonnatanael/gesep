@@ -1,5 +1,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 // =========================
 // 🌐 WIFI
@@ -14,12 +16,19 @@ const char* serverName = "http://192.168.0.7:8000/api/sensors/";
 // =========================
 #define PINO_CELULA   34
 #define PINO_RAD      35
+#define PINO_TEMP     32  // DS18B20 Signal Pin (com resistor 4,7k pull-up para VDD)
 
 // =========================
 // 📐 FATORES
 // =========================
 #define FATOR_CELULA 0.0021308331557639
 #define FATOR_IRRADIANCIA 803.86
+
+// =========================
+// 🌡️  SENSOR DS18B20
+// =========================
+OneWire oneWire(PINO_TEMP);
+DallasTemperature sensorTemp(&oneWire);
 
 // =========================
 // ⏱ TEMPO
@@ -40,6 +49,13 @@ void setup() {
   analogReadResolution(12);
   analogSetPinAttenuation(PINO_CELULA, ADC_11db);
   analogSetPinAttenuation(PINO_RAD, ADC_11db);
+
+  // Inicializar sensor de temperatura DS18B20
+  sensorTemp.begin();
+  Serial.println("🌡️  Sensor DS18B20 inicializado");
+  
+  // Configurar resolução do sensor (9-12 bits)
+  sensorTemp.setResolution(12);  // 0,0625°C de precisão
 
   // Conectar WiFi
   WiFi.begin(ssid, password);
@@ -120,6 +136,12 @@ void loop() {
     float irradiancia = tensao_rad * FATOR_IRRADIANCIA;
 
     // =========================
+    // 🌡️  LEITURA TEMPERATURA
+    // =========================
+    sensorTemp.requestTemperatures();
+    float temperatura = sensorTemp.getTempCByIndex(0);
+
+    // =========================
     // 📡 ENVIO PARA API
     // =========================
     if (WiFi.status() == WL_CONNECTED) {
@@ -134,7 +156,8 @@ void loop() {
       String httpRequestData = "{";
       httpRequestData += "\"device_id\":\"" + deviceId + "\",";
       httpRequestData += "\"tensao_shunt\":" + String(tensao_shunt, 6) + ",";
-      httpRequestData += "\"irradiance\":" + String(irradiancia, 2);
+      httpRequestData += "\"irradiance\":" + String(irradiancia, 2) + ",";
+      httpRequestData += "\"temperatura\":" + String(temperatura, 2);
       httpRequestData += "}";
 
       Serial.println("\n📤 Enviando dados para: " + String(serverName));
@@ -183,6 +206,8 @@ void loop() {
     Serial.print(adc_rad);
     Serial.print(" | Irradiancia: ");
     Serial.print(irradiancia, 2);
-    Serial.println(" W/m²");
+    Serial.print(" W/m² || 🌡️  Temperatura: ");
+    Serial.print(temperatura, 2);
+    Serial.println(" °C");
   }
 }

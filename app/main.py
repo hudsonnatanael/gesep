@@ -109,6 +109,7 @@ def flush_sensor_batch_sync(batch: list[dict]) -> list[dict]:
                 "device_id": item.device_id,
                 "tensao_shunt": item.tensao_shunt,
                 "irradiance": item.irradiance,
+                "temperatura": item.temperatura,
                 "timestamp": item.timestamp.isoformat() if item.timestamp else None,
             }
             for item in db_batch
@@ -140,12 +141,12 @@ def read_sensor_data_sync(
             logger.info(f"  🔍 Filtering by device_id: {device_id}")
             
         if start_time:
+            logger.info(f"  📅 Filtering start_time >= {start_time} (tzinfo: {start_time.tzinfo})")
             query = query.filter(models.SensorData.timestamp >= start_time)
-            logger.info(f"  📅 Filtering start_time >= {start_time}")
             
         if end_time:
+            logger.info(f"  📅 Filtering end_time <= {end_time} (tzinfo: {end_time.tzinfo})")
             query = query.filter(models.SensorData.timestamp <= end_time)
-            logger.info(f"  📅 Filtering end_time <= {end_time}")
 
         # Order by timestamp (oldest first)
         query = query.order_by(models.SensorData.timestamp.asc())
@@ -153,6 +154,9 @@ def read_sensor_data_sync(
         results = query.offset(skip).limit(limit).all()
         logger.info(f"  ✅ After filters: {len(results)} records (ordered by timestamp)")
         return results
+    except Exception as e:
+        logger.error(f"❌ ERROR in read_sensor_data_sync: {type(e).__name__}: {e}", exc_info=True)
+        raise
     finally:
         db.close()
 
@@ -222,6 +226,7 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
         "device_id": sensor_data.device_id,
         "tensao_shunt": sensor_data.tensao_shunt,
         "irradiance": sensor_data.irradiance,
+        "temperatura": sensor_data.temperatura,
         "timestamp": received_at,
     }
 
@@ -268,6 +273,7 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
             "device_id": data_to_buffer["device_id"],
             "tensao_shunt": float(data_to_buffer["tensao_shunt"]),
             "irradiance": float(data_to_buffer["irradiance"]),
+            "temperatura": float(data_to_buffer["temperatura"]),
             "timestamp": timestamp_str,
         }
         logger.debug(f"🔄 Preview data prepared: {preview_data}")
@@ -306,6 +312,31 @@ async def fix_timezone():
     finally:
         db.close()
 
+@app.get("/api/debug/migrate-temperatura")
+async def migrate_temperatura():
+    """Migrate old records to add default temperature values"""
+    from sqlalchemy import text
+    db = database.SessionLocal()
+    try:
+        # Set temperature to 25.0°C for records that have NULL
+        result = db.execute(
+            text("UPDATE sensor_data SET temperatura = 25.0 WHERE temperatura IS NULL")
+        )
+        db.commit()
+        affected_rows = result.rowcount
+        logger.info(f"✅ Migrated {affected_rows} records - set default temperatura=25.0°C")
+        return {
+            "message": "Temperature migration completed",
+            "records_updated": affected_rows,
+            "action": "Set default temperature to 25.0°C for NULL values"
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error migrating temperatura: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to migrate temperatura: {str(e)}")
+    finally:
+        db.close()
+
 @app.get("/api/debug/status")
 async def debug_status():
     """Debug endpoint showing system status"""
@@ -329,6 +360,7 @@ async def debug_test_sse():
         "device_id": "TEST_ESP32",
         "tensao_shunt": 0.00123,
         "irradiance": 456.78,
+        "temperatura": 28.5,
         "timestamp": models.get_brazil_time().isoformat()
     }
     logger.info(f"🧪 Test SSE message: {test_data}")
@@ -355,6 +387,7 @@ async def debug_latest():
                     "device_id": r.device_id,
                     "tensao_shunt": r.tensao_shunt,
                     "irradiance": r.irradiance,
+                    "temperatura": r.temperatura,
                     "timestamp": r.timestamp.isoformat() if r.timestamp else None,
                 }
                 for r in records
@@ -404,37 +437,56 @@ async def read_sensor_data(
     if start_time:
         try:
             # Handle both "2024-01-01T10:30" and "2024-01-01T10:30:00" formats
-            start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            logger.info(f"  Parsed start_time: {start_dt}")
-        except (ValueError, AttributeError) as e:
-            logger.warning(f"  Failed to parse start_time: {e}")
-            pass
+            # datetime-local from HTML doesn't include timezone info, so we parse it as naive and then add Brazil timezone
+            naive_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            
+            # If it's a naive datetime (no timezone), add Brazil timezone
+            if naive_dt.tzinfo is None:
+                start_dt = models.BRAZIL_TZ.localize(naive_dt)
+            else:
+                start_dt = naive_dt
+            
+            logger.info(f"  ✅ Parsed start_time: {start_dt}")
+        except Exception as e:
+            logger.error(f"  ❌ Failed to parse start_time '{start_time}': {type(e).__name__}: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid start_time format: {str(e)}")
     
     if end_time:
         try:
-            end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-            logger.info(f"  Parsed end_time: {end_dt}")
-        except (ValueError, AttributeError) as e:
-            logger.warning(f"  Failed to parse end_time: {e}")
-            pass
+            naive_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            
+            # If it's a naive datetime (no timezone), add Brazil timezone
+            if naive_dt.tzinfo is None:
+                end_dt = models.BRAZIL_TZ.localize(naive_dt)
+            else:
+                end_dt = naive_dt
+            
+            logger.info(f"  ✅ Parsed end_time: {end_dt}")
+        except Exception as e:
+            logger.error(f"  ❌ Failed to parse end_time '{end_time}': {type(e).__name__}: {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid end_time format: {str(e)}")
     
-    sensors = await asyncio.to_thread(
-        read_sensor_data_sync,
-        skip,
-        limit,
-        device_id,
-        start_dt,
-        end_dt,
-    )
+    try:
+        sensors = await asyncio.to_thread(
+            read_sensor_data_sync,
+            skip,
+            limit,
+            device_id,
+            start_dt,
+            end_dt,
+        )
+    except Exception as e:
+        logger.error(f"❌ Error executing query: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
     
     logger.info(f"✅ Query returned {len(sensors)} records")
     
     if format.lower() == "csv":
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["id", "device_id", "tensao_shunt", "irradiance", "timestamp"])
+        writer.writerow(["id", "device_id", "tensao_shunt", "irradiance", "temperatura", "timestamp"])
         for sensor in sensors:
-            writer.writerow([sensor.id, sensor.device_id, sensor.tensao_shunt, sensor.irradiance, sensor.timestamp.isoformat() if sensor.timestamp else ""])
+            writer.writerow([sensor.id, sensor.device_id, sensor.tensao_shunt, sensor.irradiance, sensor.temperatura, sensor.timestamp.isoformat() if sensor.timestamp else ""])
         return Response(
             content=output.getvalue(), 
             media_type="text/csv", 

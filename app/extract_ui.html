@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
   <style>
     :root {
       --bg: #ffffff;
@@ -262,6 +264,7 @@
         <button class="primary" id="btnLoad">Load Data</button>
         <button class="warn" id="btnCsv">Download CSV</button>
         <button class="ghost" id="btnJson">Download JSON</button>
+        <button class="primary" id="btnPdf">Download PDF</button>
         <button class="primary" id="btnChart">View Chart</button>
       </div>
 
@@ -282,6 +285,7 @@
               <th>Device</th>
               <th>Voltage Shunt</th>
               <th>Irradiance</th>
+              <th>Temperature</th>
               <th>Date</th>
               <th>Time</th>
             </tr>
@@ -324,7 +328,7 @@
 
     function renderRows(data) {
       if (!Array.isArray(data) || data.length === 0) {
-        rowsEl.innerHTML = '<tr><td colspan="6" class="mono">No records found.</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="7" class="mono">No records found.</td></tr>';
         return;
       }
 
@@ -341,6 +345,7 @@
           <td>${row.device_id}</td>
           <td>${row.tensao_shunt}</td>
           <td>${row.irradiance}</td>
+          <td>${row.temperatura}</td>
           <td class="mono">${date}</td>
           <td class="mono">${time}</td>
         </tr>
@@ -351,7 +356,19 @@
     async function loadData() {
       setStatus("Loading data...");
       try {
+        const deviceId = document.getElementById("deviceId").value.trim();
+        const startTime = document.getElementById("startTime").value;
+        const endTime = document.getElementById("endTime").value;
+        
         const url = `/api/sensors/?${getParams().toString()}`;
+        
+        // Show filter info
+        let filterInfo = "Filters: ";
+        if (deviceId) filterInfo += `Device=${deviceId} | `;
+        if (startTime) filterInfo += `Start=${startTime} | `;
+        if (endTime) filterInfo += `End=${endTime} | `;
+        console.log("🔍 " + filterInfo);
+        
         console.log("Fetching from:", url);
         
         const response = await fetch(url);
@@ -379,7 +396,7 @@
         }
         
         renderRows(data);
-        setStatus(`Loaded ${data.length} record(s).`, "ok");
+        setStatus(`✅ Loaded ${data.length} record(s).`, "ok");
         
         // Auto-scroll to bottom to see newest data
         setTimeout(() => {
@@ -390,7 +407,7 @@
         }, 100);
       } catch (err) {
         console.error("Load error:", err);
-        setStatus(`Failed to load data: ${err.message}`, "err");
+        setStatus(`❌ Failed to load data: ${err.message}`, "err");
       }
     }
 
@@ -421,6 +438,67 @@
       }
     }
 
+    async function downloadPdf() {
+      setStatus("Preparing PDF file...");
+      try {
+        const url = `/api/sensors/?${getParams().toString()}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        
+        // Import jsPDF from window
+        const jsPDF = window.jspdf.jsPDF;
+        const doc = new jsPDF();
+        
+        // Add title
+        doc.setFontSize(16);
+        doc.text('Sensor Data Report - GESEP', 20, 20);
+        
+        // Add metadata
+        doc.setFontSize(10);
+        doc.text(`Generated: ${new Date().toLocaleString('pt-BR')}`, 20, 30);
+        doc.text(`Records: ${data.length}`, 20, 37);
+        
+        // Prepare table data
+        const tableData = data.map(row => [
+          row.device_id,
+          parseFloat(row.tensao_shunt).toFixed(6),
+          parseFloat(row.irradiance).toFixed(2),
+          parseFloat(row.temperatura).toFixed(2),
+          new Date(row.timestamp).toLocaleDateString('pt-BR'),
+          new Date(row.timestamp).toLocaleTimeString('pt-BR'),
+        ]);
+        
+        // Add table using autoTable plugin
+        doc.autoTable({
+          head: [['Device', 'Voltage Shunt (V)', 'Irradiance (W/m²)', 'Temperature (°C)', 'Date', 'Time']],
+          body: tableData,
+          startY: 45,
+          styles: {
+            fontSize: 9,
+            cellPadding: 3,
+          },
+          headStyles: {
+            backgroundColor: [0, 255, 65],
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+          },
+          alternateRowStyles: {
+            backgroundColor: [245, 245, 245],
+          },
+        });
+        
+        // Save PDF
+        doc.save(`sensor_data_${Date.now()}.pdf`);
+        setStatus(`PDF exported with ${data.length} record(s).`, "ok");
+      } catch (err) {
+        setStatus(`Failed to export PDF: ${err.message}`, "err");
+        console.error("PDF error:", err);
+      }
+    }
+
     // Register event listeners with error handling
     console.log("📋 Registering event listeners...");
     try {
@@ -437,6 +515,11 @@
       document.getElementById("btnJson").addEventListener("click", () => {
         console.log("🖱️ Download JSON clicked");
         downloadJson().catch(err => console.error("JSON error:", err));
+      });
+      
+      document.getElementById("btnPdf").addEventListener("click", () => {
+        console.log("🖱️ Download PDF clicked");
+        downloadPdf().catch(err => console.error("PDF error:", err));
       });
       
       document.getElementById("btnCloseChart").addEventListener("click", () => {
@@ -459,15 +542,18 @@
         const timestamps = [];
         const shuntVoltages = [];
         const irradianceValues = [];
+        const temperatureValues = [];
 
         window.loadedSensorData.forEach((row) => {
           const shunt = parseFloat(row.tensao_shunt);
           const irrad = parseFloat(row.irradiance);
+          const temp = parseFloat(row.temperatura);
           
           if (!isNaN(irrad)) {
             timestamps.push(row.timestamp);
             shuntVoltages.push(!isNaN(shunt) ? shunt : null);
             irradianceValues.push(irrad);
+            temperatureValues.push(!isNaN(temp) ? temp : null);
           }
         });
 
@@ -523,6 +609,18 @@
                     pointBackgroundColor: "#0066FF",
                     yAxisID: "y1",
                   },
+                  {
+                    label: "Temperature (°C)",
+                    data: temperatureValues,
+                    borderColor: "#FF6B6B",
+                    backgroundColor: "rgba(255, 107, 107, 0.05)",
+                    tension: 0.3,
+                    fill: false,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointBackgroundColor: "#FF6B6B",
+                    yAxisID: "y2",
+                  },
                 ],
               },
               options: {
@@ -577,6 +675,20 @@
                       font: { weight: "bold" },
                     },
                     ticks: { color: "#0066FF" },
+                    grid: { drawOnChartArea: false },
+                  },
+                  y2: {
+                    type: "linear",
+                    display: true,
+                    position: "right",
+                    offset: true,
+                    title: {
+                      display: true,
+                      text: "Temperature (°C)",
+                      color: "#FF6B6B",
+                      font: { weight: "bold" },
+                    },
+                    ticks: { color: "#FF6B6B" },
                     grid: { drawOnChartArea: false },
                   },
                 },
