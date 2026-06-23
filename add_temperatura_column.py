@@ -23,17 +23,16 @@ try:
     else:
         print("🔧 Adicionando coluna 'temperatura' ao banco...")
         
-        # Add column with default value of 25.0
+        # Add column without default value
         db.execute(
             text("""
             ALTER TABLE sensor_data 
-            ADD COLUMN temperatura FLOAT NOT NULL DEFAULT 25.0
+            ADD COLUMN temperatura FLOAT
             """)
         )
         db.commit()
         
         print("✅ Coluna 'temperatura' adicionada com sucesso!")
-        print("   Valor padrão: 25.0°C para dados antigos")
         
 except Exception as e:
     db.rollback()

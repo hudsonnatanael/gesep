@@ -18,5 +18,7 @@ class SensorData(Base):
     device_id = Column(String, index=True, nullable=False)
     tensao_shunt = Column(Float, nullable=False)
     irradiance = Column(Float, nullable=False)
-    temperatura = Column(Float, nullable=False)
+    temperatura = Column(Float, nullable=True)  # Compatibilidade com dados antigos
+    temperatura_pv = Column(Float, nullable=True)  # Nova coluna para temperatura PV
+    temperatura_ambiente = Column(Float, nullable=True)  # Nova coluna para temperatura ambiente
     timestamp = Column(DateTime, default=get_brazil_time)

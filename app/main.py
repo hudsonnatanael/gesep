@@ -227,6 +227,8 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
         "tensao_shunt": sensor_data.tensao_shunt,
         "irradiance": sensor_data.irradiance,
         "temperatura": sensor_data.temperatura,
+        "temperatura_pv": sensor_data.temperatura_pv,
+        "temperatura_ambiente": sensor_data.temperatura_ambiente,
         "timestamp": received_at,
     }
 
@@ -273,7 +275,9 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
             "device_id": data_to_buffer["device_id"],
             "tensao_shunt": float(data_to_buffer["tensao_shunt"]),
             "irradiance": float(data_to_buffer["irradiance"]),
-            "temperatura": float(data_to_buffer["temperatura"]),
+            "temperatura": float(data_to_buffer["temperatura"]) if data_to_buffer["temperatura"] is not None else None,
+            "temperatura_pv": float(data_to_buffer["temperatura_pv"]) if data_to_buffer["temperatura_pv"] is not None else None,
+            "temperatura_ambiente": float(data_to_buffer["temperatura_ambiente"]) if data_to_buffer["temperatura_ambiente"] is not None else None,
             "timestamp": timestamp_str,
         }
         logger.debug(f"🔄 Preview data prepared: {preview_data}")
@@ -309,31 +313,6 @@ async def fix_timezone():
         db.rollback()
         logger.error(f"❌ Error fixing timezone: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fix timezone: {str(e)}")
-    finally:
-        db.close()
-
-@app.get("/api/debug/migrate-temperatura")
-async def migrate_temperatura():
-    """Migrate old records to add default temperature values"""
-    from sqlalchemy import text
-    db = database.SessionLocal()
-    try:
-        # Set temperature to 25.0°C for records that have NULL
-        result = db.execute(
-            text("UPDATE sensor_data SET temperatura = 25.0 WHERE temperatura IS NULL")
-        )
-        db.commit()
-        affected_rows = result.rowcount
-        logger.info(f"✅ Migrated {affected_rows} records - set default temperatura=25.0°C")
-        return {
-            "message": "Temperature migration completed",
-            "records_updated": affected_rows,
-            "action": "Set default temperature to 25.0°C for NULL values"
-        }
-    except Exception as e:
-        db.rollback()
-        logger.error(f"❌ Error migrating temperatura: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to migrate temperatura: {str(e)}")
     finally:
         db.close()
 
@@ -419,6 +398,31 @@ async def system_status():
     finally:
         db.close()
 
+@app.get("/api/debug/fix-temp-pv")
+async def fix_temp_pv():
+    """Fix old records with temperatura_pv = 25.0 (set to 0)"""
+    from sqlalchemy import text
+    db = database.SessionLocal()
+    try:
+        # Set temperatura_pv to 0 where it's 25 (old default value)
+        result = db.execute(
+            text("UPDATE sensor_data SET temperatura_pv = 0 WHERE temperatura_pv = 25.0")
+        )
+        db.commit()
+        affected_rows = result.rowcount
+        logger.info(f"✅ Fixed {affected_rows} records - set temperatura_pv from 25.0°C to 0°C")
+        return {
+            "message": "Temperature PV fix applied successfully",
+            "records_updated": affected_rows,
+            "action": "Set temperatura_pv from 25.0°C to 0°C for old records"
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Error fixing temperatura_pv: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fix temperatura_pv: {str(e)}")
+    finally:
+        db.close()
+
 @app.get("/api/sensors/", response_model=list[schemas.SensorDataResponse])
 async def read_sensor_data(
     skip: int = 0, 
@@ -484,9 +488,18 @@ async def read_sensor_data(
     if format.lower() == "csv":
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["id", "device_id", "tensao_shunt", "irradiance", "temperatura", "timestamp"])
+        writer.writerow(["id", "device_id", "tensao_shunt", "irradiance", "temperatura", "temperatura_pv", "temperatura_ambiente", "timestamp"])
         for sensor in sensors:
-            writer.writerow([sensor.id, sensor.device_id, sensor.tensao_shunt, sensor.irradiance, sensor.temperatura, sensor.timestamp.isoformat() if sensor.timestamp else ""])
+            writer.writerow([
+                sensor.id, 
+                sensor.device_id, 
+                sensor.tensao_shunt, 
+                sensor.irradiance, 
+                sensor.temperatura if sensor.temperatura is not None else "",
+                sensor.temperatura_pv if sensor.temperatura_pv is not None else "",
+                sensor.temperatura_ambiente if sensor.temperatura_ambiente is not None else "",
+                sensor.timestamp.isoformat() if sensor.timestamp else ""
+            ])
         return Response(
             content=output.getvalue(), 
             media_type="text/csv", 

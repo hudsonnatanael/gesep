@@ -285,7 +285,8 @@
               <th>Device</th>
               <th>Voltage Shunt</th>
               <th>Irradiance</th>
-              <th>Temperature</th>
+              <th>Temperature PV</th>
+              <th>Temperature Ambient</th>
               <th>Date</th>
               <th>Time</th>
             </tr>
@@ -328,7 +329,7 @@
 
     function renderRows(data) {
       if (!Array.isArray(data) || data.length === 0) {
-        rowsEl.innerHTML = '<tr><td colspan="7" class="mono">No records found.</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="8" class="mono">No records found.</td></tr>';
         return;
       }
 
@@ -345,7 +346,8 @@
           <td>${row.device_id}</td>
           <td>${row.tensao_shunt}</td>
           <td>${row.irradiance}</td>
-          <td>${row.temperatura}</td>
+          <td>${row.temperatura_pv || row.temperatura || '-'}</td>
+          <td>${row.temperatura_ambiente || '-'}</td>
           <td class="mono">${date}</td>
           <td class="mono">${time}</td>
         </tr>
@@ -466,14 +468,15 @@
           row.device_id,
           parseFloat(row.tensao_shunt).toFixed(6),
           parseFloat(row.irradiance).toFixed(2),
-          parseFloat(row.temperatura).toFixed(2),
+          row.temperatura_pv ? parseFloat(row.temperatura_pv).toFixed(2) : '-',
+          row.temperatura_ambiente ? parseFloat(row.temperatura_ambiente).toFixed(2) : '-',
           new Date(row.timestamp).toLocaleDateString('pt-BR'),
           new Date(row.timestamp).toLocaleTimeString('pt-BR'),
         ]);
         
         // Add table using autoTable plugin
         doc.autoTable({
-          head: [['Device', 'Voltage Shunt (V)', 'Irradiance (W/m²)', 'Temperature (°C)', 'Date', 'Time']],
+          head: [['Device', 'Voltage Shunt (V)', 'Irradiance (W/m²)', 'Temp PV (°C)', 'Temp Ambient (°C)', 'Date', 'Time']],
           body: tableData,
           startY: 45,
           styles: {
@@ -542,18 +545,21 @@
         const timestamps = [];
         const shuntVoltages = [];
         const irradianceValues = [];
-        const temperatureValues = [];
+        const temperaturePvValues = [];
+        const temperatureAmbientValues = [];
 
         window.loadedSensorData.forEach((row) => {
           const shunt = parseFloat(row.tensao_shunt);
           const irrad = parseFloat(row.irradiance);
-          const temp = parseFloat(row.temperatura);
+          const tempPv = parseFloat(row.temperatura_pv || row.temperatura || 0);
+          const tempAmbient = parseFloat(row.temperatura_ambiente || 0);
           
           if (!isNaN(irrad)) {
             timestamps.push(row.timestamp);
             shuntVoltages.push(!isNaN(shunt) ? shunt : null);
             irradianceValues.push(irrad);
-            temperatureValues.push(!isNaN(temp) ? temp : null);
+            temperaturePvValues.push(!isNaN(tempPv) ? tempPv : null);
+            temperatureAmbientValues.push(!isNaN(tempAmbient) ? tempAmbient : null);
           }
         });
 
@@ -610,8 +616,8 @@
                     yAxisID: "y1",
                   },
                   {
-                    label: "Temperature (°C)",
-                    data: temperatureValues,
+                    label: "Temperature PV (°C)",
+                    data: temperaturePvValues,
                     borderColor: "#FF6B6B",
                     backgroundColor: "rgba(255, 107, 107, 0.05)",
                     tension: 0.3,
@@ -619,6 +625,18 @@
                     borderWidth: 2,
                     pointRadius: 4,
                     pointBackgroundColor: "#FF6B6B",
+                    yAxisID: "y2",
+                  },
+                  {
+                    label: "Temperature Ambient (°C)",
+                    data: temperatureAmbientValues,
+                    borderColor: "#FF9500",
+                    backgroundColor: "rgba(255, 149, 0, 0.05)",
+                    tension: 0.3,
+                    fill: false,
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointBackgroundColor: "#FF9500",
                     yAxisID: "y2",
                   },
                 ],
