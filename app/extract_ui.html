@@ -283,7 +283,7 @@
             <tr>
               <th>Nº</th>
               <th>Device</th>
-              <th>Voltage Shunt</th>
+              <th>Irradiância Cell</th>
               <th>Irradiance</th>
               <th>Temperature PV</th>
               <th>Temperature Ambient</th>
@@ -292,7 +292,7 @@
             </tr>
           </thead>
           <tbody id="rows">
-            <tr><td colspan="5" class="mono">No data loaded yet.</td></tr>
+            <tr><td colspan="8" class="mono">No data loaded yet.</td></tr>
           </tbody>
         </table>
       </div>
@@ -344,7 +344,7 @@
         <tr>
           <td class="mono">${index + 1}</td>
           <td>${row.device_id}</td>
-          <td>${row.tensao_shunt}</td>
+          <td>${row.irradiance_cell ?? '-'}</td>
           <td>${row.irradiance}</td>
           <td>${row.temperatura_pv || row.temperatura || '-'}</td>
           <td>${row.temperatura_ambiente || '-'}</td>
@@ -466,7 +466,7 @@
         // Prepare table data
         const tableData = data.map(row => [
           row.device_id,
-          parseFloat(row.tensao_shunt).toFixed(6),
+          row.irradiance_cell != null ? parseFloat(row.irradiance_cell).toFixed(2) : '-',
           parseFloat(row.irradiance).toFixed(2),
           row.temperatura_pv ? parseFloat(row.temperatura_pv).toFixed(2) : '-',
           row.temperatura_ambiente ? parseFloat(row.temperatura_ambiente).toFixed(2) : '-',
@@ -476,7 +476,7 @@
         
         // Add table using autoTable plugin
         doc.autoTable({
-          head: [['Device', 'Voltage Shunt (V)', 'Irradiance (W/m²)', 'Temp PV (°C)', 'Temp Ambient (°C)', 'Date', 'Time']],
+          head: [['Device', 'Irradiância Cell (W/m²)', 'Irradiance (W/m²)', 'Temp PV (°C)', 'Temp Ambient (°C)', 'Date', 'Time']],
           body: tableData,
           startY: 45,
           styles: {
@@ -543,20 +543,20 @@
         }
 
         const timestamps = [];
-        const shuntVoltages = [];
+        const irradianceCellValues = [];
         const irradianceValues = [];
         const temperaturePvValues = [];
         const temperatureAmbientValues = [];
 
         window.loadedSensorData.forEach((row) => {
-          const shunt = parseFloat(row.tensao_shunt);
+          const irradianceCell = parseFloat(row.irradiance_cell);
           const irrad = parseFloat(row.irradiance);
           const tempPv = parseFloat(row.temperatura_pv || row.temperatura || 0);
           const tempAmbient = parseFloat(row.temperatura_ambiente || 0);
           
           if (!isNaN(irrad)) {
             timestamps.push(row.timestamp);
-            shuntVoltages.push(!isNaN(shunt) ? shunt : null);
+            irradianceCellValues.push(!isNaN(irradianceCell) ? irradianceCell : null);
             irradianceValues.push(irrad);
             temperaturePvValues.push(!isNaN(tempPv) ? tempPv : null);
             temperatureAmbientValues.push(!isNaN(tempAmbient) ? tempAmbient : null);
@@ -604,8 +604,8 @@
                     yAxisID: "y",
                   },
                   {
-                    label: "Voltage Shunt (V)",
-                    data: shuntVoltages,
+                    label: "Irradiância Cell (W/m²)",
+                    data: irradianceCellValues,
                     borderColor: "#0066FF",
                     backgroundColor: "rgba(0, 102, 255, 0.05)",
                     tension: 0.3,
@@ -684,11 +684,11 @@
                     type: "linear",
                     display: true,
                     position: "right",
-                    min: 0.0009,
-                    max: 0.006,
+                    min: 0,
+                    max: 1000,
                     title: {
                       display: true,
-                      text: "Voltage Shunt (V)",
+                      text: "Irradiância Cell (W/m²)",
                       color: "#0066FF",
                       font: { weight: "bold" },
                     },

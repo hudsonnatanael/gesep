@@ -53,6 +53,7 @@ async def health_check():
 # Startup event
 @app.on_event("startup")
 async def startup_event():
+    ensure_sensor_schema()
     logger.info("✅ Servidor pronto para receber dados da ESP32!")
     logger.info(f"📍 Acesse: http://localhost:8000/extract")
     logger.info(f"🔌 API ESP32: http://localhost:8000/api/sensors/")
@@ -65,6 +66,18 @@ buffer_lock = asyncio.Lock()
 sse_clients: list[asyncio.Queue] = []
 sse_lock = asyncio.Lock()
 EXTRACT_UI_PATH = Path(__file__).with_name("extract_ui.html")
+
+
+def ensure_sensor_schema() -> None:
+    inspector = inspect(database.engine)
+    if "sensor_data" not in inspector.get_table_names():
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("sensor_data")}
+    if "irradiance_cell" not in columns:
+        with database.engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sensor_data ADD COLUMN irradiance_cell FLOAT"))
+        logger.info("✅ Added irradiance_cell column to sensor_data table")
 
 
 async def broadcast_sensor(data: dict) -> None:
@@ -109,6 +122,7 @@ def flush_sensor_batch_sync(batch: list[dict]) -> list[dict]:
                 "device_id": item.device_id,
                 "tensao_shunt": item.tensao_shunt,
                 "irradiance": item.irradiance,
+                "irradiance_cell": item.irradiance_cell,
                 "temperatura": item.temperatura,
                 "timestamp": item.timestamp.isoformat() if item.timestamp else None,
             }
@@ -215,7 +229,10 @@ async def extract_interface():
 
 @app.post("/api/sensors/", response_model=schemas.SensorDataIngestResponse, status_code=201)
 async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
-    logger.info(f"📥 Received sensor data: device={sensor_data.device_id}, shunt={sensor_data.tensao_shunt}, irrad={sensor_data.irradiance}")
+    logger.info(
+        f"📥 Received sensor data: device={sensor_data.device_id}, shunt={sensor_data.tensao_shunt}, "
+        f"irrad={sensor_data.irradiance}, irrad_cell={sensor_data.irradiance_cell}"
+    )
     
     batch_to_flush: list[dict] = []
     buffered_count = 0
@@ -226,6 +243,7 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
         "device_id": sensor_data.device_id,
         "tensao_shunt": sensor_data.tensao_shunt,
         "irradiance": sensor_data.irradiance,
+        "irradiance_cell": sensor_data.irradiance_cell,
         "temperatura": sensor_data.temperatura,
         "temperatura_pv": sensor_data.temperatura_pv,
         "temperatura_ambiente": sensor_data.temperatura_ambiente,
@@ -275,6 +293,7 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
             "device_id": data_to_buffer["device_id"],
             "tensao_shunt": float(data_to_buffer["tensao_shunt"]),
             "irradiance": float(data_to_buffer["irradiance"]),
+            "irradiance_cell": float(data_to_buffer["irradiance_cell"]) if data_to_buffer["irradiance_cell"] is not None else None,
             "temperatura": float(data_to_buffer["temperatura"]) if data_to_buffer["temperatura"] is not None else None,
             "temperatura_pv": float(data_to_buffer["temperatura_pv"]) if data_to_buffer["temperatura_pv"] is not None else None,
             "temperatura_ambiente": float(data_to_buffer["temperatura_ambiente"]) if data_to_buffer["temperatura_ambiente"] is not None else None,
@@ -294,7 +313,7 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
 @app.get("/api/debug/fix-timezone")
 async def fix_timezone():
     """Fix timestamps in existing records by adding 3 hours"""
-    from sqlalchemy import text
+    from sqlalchemy import text, inspect
     db = database.SessionLocal()
     try:
         # Add 3 hours to all timestamps
@@ -339,6 +358,7 @@ async def debug_test_sse():
         "device_id": "TEST_ESP32",
         "tensao_shunt": 0.00123,
         "irradiance": 456.78,
+        "irradiance_cell": 321.09,
         "temperatura": 28.5,
         "timestamp": models.get_brazil_time().isoformat()
     }
@@ -366,6 +386,7 @@ async def debug_latest():
                     "device_id": r.device_id,
                     "tensao_shunt": r.tensao_shunt,
                     "irradiance": r.irradiance,
+                    "irradiance_cell": r.irradiance_cell,
                     "temperatura": r.temperatura,
                     "timestamp": r.timestamp.isoformat() if r.timestamp else None,
                 }
@@ -488,13 +509,14 @@ async def read_sensor_data(
     if format.lower() == "csv":
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["id", "device_id", "tensao_shunt", "irradiance", "temperatura", "temperatura_pv", "temperatura_ambiente", "timestamp"])
+        writer.writerow(["id", "device_id", "tensao_shunt", "irradiance", "irradiance_cell", "temperatura", "temperatura_pv", "temperatura_ambiente", "timestamp"])
         for sensor in sensors:
             writer.writerow([
                 sensor.id, 
                 sensor.device_id, 
                 sensor.tensao_shunt, 
                 sensor.irradiance, 
+                sensor.irradiance_cell if sensor.irradiance_cell is not None else "",
                 sensor.temperatura if sensor.temperatura is not None else "",
                 sensor.temperatura_pv if sensor.temperatura_pv is not None else "",
                 sensor.temperatura_ambiente if sensor.temperatura_ambiente is not None else "",

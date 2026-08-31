@@ -14,14 +14,14 @@ const char* serverName = "http://192.168.0.5:8000/api/sensors/";
 // =========================
 // 🔌 PINOS
 // =========================
-#define PINO_CELULA   34
+#define PINO_IRRADCELL  34
 #define PINO_RAD      35
 #define PINO_TEMP     32  // DS18B20 Signal Pin (com resistor 4,7k pull-up para VDD)
 
 // =========================
 // 📐 FATORES
 // =========================
-#define FATOR_CELULA 0.0021308331557639
+#define FATOR_IRRADCELL (1000/3602.3079) 
 #define FATOR_IRRADIANCIA 803.86
 
 // =========================
@@ -51,7 +51,7 @@ void setup() {
   Serial.println(ssid);
 
   analogReadResolution(12);
-  analogSetPinAttenuation(PINO_CELULA, ADC_11db);
+  analogSetPinAttenuation(PINO_IRRADCELL, ADC_11db);
   analogSetPinAttenuation(PINO_RAD, ADC_11db);
 
   // Inicializar sensor de temperatura DS18B20
@@ -155,10 +155,10 @@ void loop() {
     // =========================
     // 🔵 LEITURA CÉLULA
     // =========================
-    int adc_celula = analogRead(PINO_CELULA);
+    int adc_irradcell = analogRead(PINO_IRRADCELL);
 
-    float tensao_esp32_celula = (0.000808 * adc_celula) + 0.146421;
-    float tensao_shunt = FATOR_CELULA * tensao_esp32_celula;
+  
+    float irradiancia_cell = FATOR_IRRADCELL * adc_irradcell;
 
     // =========================
     // 🟡 LEITURA PIRANÔMETRO
@@ -205,6 +205,7 @@ void loop() {
       httpRequestData += "\"device_id\":\"" + deviceId + "\",";
       httpRequestData += "\"tensao_shunt\":" + String(tensao_shunt, 6) + ",";
       httpRequestData += "\"irradiance\":" + String(irradiancia, 2) + ",";
+      httpRequestData += "\"irradiance_cell\":" + String(irradiancia_cell, 2) + ",";
       httpRequestData += "\"temperatura_pv\":" + String(temperatura_pv, 2) + ",";
       httpRequestData += "\"temperatura_ambiente\":" + String(temperatura_ambiente, 2);
       httpRequestData += "}";
@@ -246,10 +247,10 @@ void loop() {
     // =========================
     // 📊 DEBUG SERIAL
     // =========================
-    Serial.print("ADC Celula: ");
-    Serial.print(adc_celula);
-    Serial.print(" | Vshunt: ");
-    Serial.print(tensao_shunt, 6);
+    Serial.print("ADC Irradcell: ");
+    Serial.print(adc_irradcell);
+    Serial.print(" | Irradcell: ");
+    Serial.print(irradiancia_cell, 6);
 
     Serial.print(" || ADC Rad: ");
     Serial.print(adc_rad);

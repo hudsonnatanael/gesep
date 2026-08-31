@@ -6,6 +6,7 @@ class SensorDataCreate(BaseModel):
     device_id: str = Field(..., description="Unique identifier of the ESP32")
     tensao_shunt: float = Field(..., description="tensao_shunt read by the sensor")
     irradiance: float = Field(..., description="Solar irradiance read by the sensor")
+    irradiance_cell: Optional[float] = Field(None, description="Irradiance read by the cell sensor")
     temperatura: Optional[float] = Field(None, description="Temperature read by DS18B20 sensor (backward compatibility)")
     temperatura_pv: Optional[float] = Field(None, description="PV Module temperature read by DS18B20 sensor")
     temperatura_ambiente: Optional[float] = Field(None, description="Ambient temperature read by DS18B20 sensor")
@@ -22,6 +23,7 @@ class SensorDataResponse(BaseModel):
     device_id: str
     tensao_shunt: float
     irradiance: float
+    irradiance_cell: Optional[float] = None
     temperatura: Optional[float] = None  # Pode ser None para dados antigos
     temperatura_pv: Optional[float] = None  # Temperatura PV
     temperatura_ambiente: Optional[float] = None  # Temperatura ambiente
