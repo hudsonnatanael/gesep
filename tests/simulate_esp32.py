@@ -8,7 +8,6 @@ URL = "http://localhost:8000/api/sensors/"
 def send_data():
     payload = {
         "device_id": "ESP32_LIVING_ROOM22",
-        "tensao_shunt": round(random.uniform(0.0, 5.0), 2),
         "irradiance": round(random.uniform(0.0, 1000.0), 2),
         "irradiance_cell": round(random.uniform(0.0, 1000.0), 2)
     }

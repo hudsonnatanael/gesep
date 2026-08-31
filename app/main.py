@@ -10,6 +10,7 @@ import uvicorn
 import json
 import logging
 from pathlib import Path
+from sqlalchemy import inspect, text
 from . import models, schemas, database
 
 # Configure logging with detailed format
@@ -229,8 +230,12 @@ async def extract_interface():
 
 @app.post("/api/sensors/", response_model=schemas.SensorDataIngestResponse, status_code=201)
 async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
+    effective_shunt = sensor_data.tensao_shunt if sensor_data.tensao_shunt is not None else sensor_data.irradiance_cell
+    if effective_shunt is None:
+        effective_shunt = 0.0
+
     logger.info(
-        f"📥 Received sensor data: device={sensor_data.device_id}, shunt={sensor_data.tensao_shunt}, "
+        f"📥 Received sensor data: device={sensor_data.device_id}, shunt={effective_shunt}, "
         f"irrad={sensor_data.irradiance}, irrad_cell={sensor_data.irradiance_cell}"
     )
     
@@ -241,7 +246,7 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
     # Prepare data for buffering
     data_to_buffer = {
         "device_id": sensor_data.device_id,
-        "tensao_shunt": sensor_data.tensao_shunt,
+        "tensao_shunt": effective_shunt,
         "irradiance": sensor_data.irradiance,
         "irradiance_cell": sensor_data.irradiance_cell,
         "temperatura": sensor_data.temperatura,
