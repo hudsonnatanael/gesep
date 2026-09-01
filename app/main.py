@@ -59,7 +59,7 @@ async def startup_event():
     logger.info(f"📍 Acesse: http://localhost:8000/extract")
     logger.info(f"🔌 API ESP32: http://localhost:8000/api/sensors/")
 
-BUFFER_SIZE = 12
+BUFFER_SIZE = 10
 sensor_buffer: list[dict] = []
 buffer_lock = asyncio.Lock()
 
@@ -229,55 +229,77 @@ async def extract_interface():
 
 
 @app.post("/api/sensors/", response_model=schemas.SensorDataIngestResponse, status_code=201)
-async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
-    effective_shunt = sensor_data.tensao_shunt if sensor_data.tensao_shunt is not None else sensor_data.irradiance_cell
-    if effective_shunt is None:
-        effective_shunt = 0.0
+async def create_sensor_data(sensor_data: schemas.SensorDataCreate | list[schemas.SensorDataCreate]):
+    items = sensor_data if isinstance(sensor_data, list) else [sensor_data]
 
-    logger.info(
-        f"📥 Received sensor data: device={sensor_data.device_id}, shunt={effective_shunt}, "
-        f"irrad={sensor_data.irradiance}, irrad_cell={sensor_data.irradiance_cell}"
-    )
-    
+    if not items:
+        raise HTTPException(status_code=400, detail="No sensor data provided")
+
     batch_to_flush: list[dict] = []
     buffered_count = 0
-    received_at = models.get_brazil_time()
-    
-    # Prepare data for buffering
-    data_to_buffer = {
-        "device_id": sensor_data.device_id,
-        "tensao_shunt": effective_shunt,
-        "irradiance": sensor_data.irradiance,
-        "irradiance_cell": sensor_data.irradiance_cell,
-        "temperatura": sensor_data.temperatura,
-        "temperatura_pv": sensor_data.temperatura_pv,
-        "temperatura_ambiente": sensor_data.temperatura_ambiente,
-        "timestamp": received_at,
-    }
-
-    async with buffer_lock:
-        sensor_buffer.append(data_to_buffer)
-        
-        # Check if buffer should be flushed
-        if len(sensor_buffer) >= BUFFER_SIZE:
-            batch_to_flush = sensor_buffer[:]
-            sensor_buffer.clear()
-            logger.info(f"💾 Buffer full ({BUFFER_SIZE} items), flushing to database")
-        buffered_count = len(sensor_buffer)
-
     inserted_count = 0
     flushed = False
     saved_data = []
-    
-    # Flush batch to database if buffer is full
+
+    for current_item in items:
+        effective_shunt = current_item.tensao_shunt if current_item.tensao_shunt is not None else current_item.irradiance_cell
+        if effective_shunt is None:
+            effective_shunt = 0.0
+
+        logger.info(
+            f"📥 Received sensor data: device={current_item.device_id}, shunt={effective_shunt}, "
+            f"irrad={current_item.irradiance}, irrad_cell={current_item.irradiance_cell}"
+        )
+
+        raw_timestamp = current_item.timestamp
+        if raw_timestamp is not None:
+            if raw_timestamp.tzinfo is None:
+                received_at = models.BRAZIL_TZ.localize(raw_timestamp)
+            else:
+                received_at = raw_timestamp.astimezone(models.BRAZIL_TZ)
+        else:
+            received_at = models.get_brazil_time()
+
+        data_to_buffer = {
+            "device_id": current_item.device_id,
+            "tensao_shunt": effective_shunt,
+            "irradiance": current_item.irradiance,
+            "irradiance_cell": current_item.irradiance_cell,
+            "temperatura": current_item.temperatura,
+            "temperatura_pv": current_item.temperatura_pv,
+            "temperatura_ambiente": current_item.temperatura_ambiente,
+            "timestamp": received_at,
+        }
+
+        async with buffer_lock:
+            sensor_buffer.append(data_to_buffer)
+            if len(sensor_buffer) >= BUFFER_SIZE:
+                batch_to_flush = sensor_buffer[:]
+                sensor_buffer.clear()
+                logger.info(f"💾 Buffer full ({BUFFER_SIZE} items), flushing to database")
+            buffered_count = len(sensor_buffer)
+
+        if len(sse_clients) > 0:
+            timestamp_str = received_at.isoformat() if hasattr(received_at, 'isoformat') else str(received_at)
+            preview_data = {
+                "id": -1,
+                "device_id": data_to_buffer["device_id"],
+                "tensao_shunt": float(data_to_buffer["tensao_shunt"]),
+                "irradiance": float(data_to_buffer["irradiance"]),
+                "irradiance_cell": float(data_to_buffer["irradiance_cell"]) if data_to_buffer["irradiance_cell"] is not None else None,
+                "temperatura": float(data_to_buffer["temperatura"]) if data_to_buffer["temperatura"] is not None else None,
+                "temperatura_pv": float(data_to_buffer["temperatura_pv"]) if data_to_buffer["temperatura_pv"] is not None else None,
+                "temperatura_ambiente": float(data_to_buffer["temperatura_ambiente"]) if data_to_buffer["temperatura_ambiente"] is not None else None,
+                "timestamp": timestamp_str,
+            }
+            await broadcast_sensor(preview_data)
+
     if batch_to_flush:
         try:
             saved_data = await asyncio.to_thread(flush_sensor_batch_sync, batch_to_flush)
             inserted_count = len(saved_data)
             flushed = True
             logger.info(f"✅ Saved {inserted_count} records to database")
-            
-            # Broadcast each saved record to SSE clients
             for record in saved_data:
                 await broadcast_sensor(record)
         except Exception as e:
@@ -286,27 +308,6 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate):
                 sensor_buffer[0:0] = batch_to_flush
                 buffered_count = len(sensor_buffer)
             raise HTTPException(status_code=500, detail="Failed to flush buffered measurements to database")
-    
-    # Also broadcast the current data immediately to SSE for real-time visualization
-    # (even if not yet saved to database - frontend preview)
-    if len(sse_clients) > 0:
-        # Convert timestamp to ISO string to ensure JSON serializability
-        timestamp_str = received_at.isoformat() if hasattr(received_at, 'isoformat') else str(received_at)
-        
-        preview_data = {
-            "id": -1,  # Temporary ID for preview
-            "device_id": data_to_buffer["device_id"],
-            "tensao_shunt": float(data_to_buffer["tensao_shunt"]),
-            "irradiance": float(data_to_buffer["irradiance"]),
-            "irradiance_cell": float(data_to_buffer["irradiance_cell"]) if data_to_buffer["irradiance_cell"] is not None else None,
-            "temperatura": float(data_to_buffer["temperatura"]) if data_to_buffer["temperatura"] is not None else None,
-            "temperatura_pv": float(data_to_buffer["temperatura_pv"]) if data_to_buffer["temperatura_pv"] is not None else None,
-            "temperatura_ambiente": float(data_to_buffer["temperatura_ambiente"]) if data_to_buffer["temperatura_ambiente"] is not None else None,
-            "timestamp": timestamp_str,
-        }
-        logger.debug(f"🔄 Preview data prepared: {preview_data}")
-        await broadcast_sensor(preview_data)
-        logger.debug(f"📡 Broadcasted preview data to {len(sse_clients)} SSE clients")
 
     return {
         "message": "Measurement buffered",

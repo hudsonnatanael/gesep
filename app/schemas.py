@@ -10,6 +10,7 @@ class SensorDataCreate(BaseModel):
     temperatura: Optional[float] = Field(None, description="Temperature read by DS18B20 sensor (backward compatibility)")
     temperatura_pv: Optional[float] = Field(None, description="PV Module temperature read by DS18B20 sensor")
     temperatura_ambiente: Optional[float] = Field(None, description="Ambient temperature read by DS18B20 sensor")
+    timestamp: Optional[datetime] = Field(None, description="Measurement timestamp; if omitted, server uses current Brazil time")
 
 
 class SensorDataIngestResponse(BaseModel):
