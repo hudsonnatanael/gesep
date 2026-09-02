@@ -15,7 +15,9 @@ if db_url:
     SQLALCHEMY_DATABASE_URL = db_url
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
-        connect_args={"options": "-c timezone=America/Sao_Paulo"}
+        connect_args={"options": "-c timezone=America/Sao_Paulo"},
+        pool_pre_ping=True,
+        pool_recycle=300,
     )
 else:
     # Use SQLite locally (easier for development)

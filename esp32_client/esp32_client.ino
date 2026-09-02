@@ -15,8 +15,8 @@ const char* password = "g3s3pufv";
 // CONFIGURAÇÕES DA API
 // ============================================================
 
-const char* serverURL = "http://192.168.0.16:8000/api/sensors/";
-const char* healthURL = "http://192.168.0.16:8000/api/health";
+const char* serverURL = "http://192.168.0.14:8000/api/sensors/";
+const char* healthURL = "http://192.168.0.14:8000/api/health";
 
 const char* DEVICE_ID = "ESP32_SENSOR_01";
 

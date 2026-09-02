@@ -10,7 +10,7 @@ import uvicorn
 import json
 import logging
 from pathlib import Path
-from sqlalchemy import inspect, text
+from sqlalchemy import and_, inspect, or_, text
 from . import models, schemas, database
 
 # Configure logging with detailed format
@@ -108,7 +108,40 @@ async def broadcast_sensor(data: dict) -> None:
 def flush_sensor_batch_sync(batch: list[dict]) -> list[dict]:
     db = database.SessionLocal()
     try:
-        db_batch = [models.SensorData(**item) for item in batch]
+        unique_batch = []
+        seen_keys = set()
+        for item in batch:
+            key = (item["device_id"], item["timestamp"])
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_batch.append(item)
+
+        if not unique_batch:
+            return []
+
+        existing_records = db.query(models.SensorData).filter(
+            or_(
+                *(
+                    and_(
+                        models.SensorData.device_id == item["device_id"],
+                        models.SensorData.timestamp == item["timestamp"],
+                    )
+                    for item in unique_batch
+                )
+            )
+        ).all()
+        existing_keys = {(item.device_id, item.timestamp) for item in existing_records}
+
+        new_items = [
+            item for item in unique_batch
+            if (item["device_id"], item["timestamp"]) not in existing_keys
+        ]
+        if not new_items:
+            db.rollback()
+            logger.info("⏭️ Ignored duplicate sensor measurements")
+            return []
+
+        db_batch = [models.SensorData(**item) for item in new_items]
         db.add_all(db_batch)
         db.commit()
         
