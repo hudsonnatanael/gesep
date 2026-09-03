@@ -69,6 +69,11 @@ sse_lock = asyncio.Lock()
 EXTRACT_UI_PATH = Path(__file__).with_name("extract_ui.html")
 
 
+def sensor_measurement_key(device_id: str, timestamp: datetime) -> tuple[str, datetime]:
+    normalized_timestamp = timestamp.astimezone(models.BRAZIL_TZ).replace(tzinfo=None)
+    return device_id, normalized_timestamp
+
+
 def ensure_sensor_schema() -> None:
     inspector = inspect(database.engine)
     if "sensor_data" not in inspector.get_table_names():
@@ -79,6 +84,31 @@ def ensure_sensor_schema() -> None:
         with database.engine.begin() as conn:
             conn.execute(text("ALTER TABLE sensor_data ADD COLUMN irradiance_cell FLOAT"))
         logger.info("✅ Added irradiance_cell column to sensor_data table")
+
+    with database.engine.begin() as conn:
+        if database.engine.dialect.name == "postgresql":
+            result = conn.execute(text("""
+                DELETE FROM sensor_data duplicate
+                USING sensor_data original
+                WHERE duplicate.id > original.id
+                  AND duplicate.device_id = original.device_id
+                  AND duplicate.timestamp = original.timestamp
+            """))
+        else:
+            result = conn.execute(text("""
+                DELETE FROM sensor_data
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM sensor_data
+                    GROUP BY device_id, timestamp
+                )
+            """))
+        if result.rowcount:
+            logger.info(f"🧹 Removed {result.rowcount} exact duplicate measurements")
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_sensor_data_device_timestamp
+            ON sensor_data (device_id, timestamp)
+        """))
 
 
 async def broadcast_sensor(data: dict) -> None:
@@ -111,7 +141,7 @@ def flush_sensor_batch_sync(batch: list[dict]) -> list[dict]:
         unique_batch = []
         seen_keys = set()
         for item in batch:
-            key = (item["device_id"], item["timestamp"])
+            key = sensor_measurement_key(item["device_id"], item["timestamp"])
             if key not in seen_keys:
                 seen_keys.add(key)
                 unique_batch.append(item)
@@ -130,11 +160,14 @@ def flush_sensor_batch_sync(batch: list[dict]) -> list[dict]:
                 )
             )
         ).all()
-        existing_keys = {(item.device_id, item.timestamp) for item in existing_records}
+        existing_keys = {
+            sensor_measurement_key(item.device_id, item.timestamp.replace(tzinfo=models.BRAZIL_TZ))
+            for item in existing_records
+        }
 
         new_items = [
             item for item in unique_batch
-            if (item["device_id"], item["timestamp"]) not in existing_keys
+            if sensor_measurement_key(item["device_id"], item["timestamp"]) not in existing_keys
         ]
         if not new_items:
             db.rollback()
@@ -311,21 +344,6 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate | list[schema
                 sensor_buffer.clear()
                 logger.info(f"💾 Buffer full ({BUFFER_SIZE} items), flushing to database")
             buffered_count = len(sensor_buffer)
-
-        if len(sse_clients) > 0:
-            timestamp_str = received_at.isoformat() if hasattr(received_at, 'isoformat') else str(received_at)
-            preview_data = {
-                "id": -1,
-                "device_id": data_to_buffer["device_id"],
-                "tensao_shunt": float(data_to_buffer["tensao_shunt"]),
-                "irradiance": float(data_to_buffer["irradiance"]),
-                "irradiance_cell": float(data_to_buffer["irradiance_cell"]) if data_to_buffer["irradiance_cell"] is not None else None,
-                "temperatura": float(data_to_buffer["temperatura"]) if data_to_buffer["temperatura"] is not None else None,
-                "temperatura_pv": float(data_to_buffer["temperatura_pv"]) if data_to_buffer["temperatura_pv"] is not None else None,
-                "temperatura_ambiente": float(data_to_buffer["temperatura_ambiente"]) if data_to_buffer["temperatura_ambiente"] is not None else None,
-                "timestamp": timestamp_str,
-            }
-            await broadcast_sensor(preview_data)
 
     if batch_to_flush:
         try:
