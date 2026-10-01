@@ -301,7 +301,7 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate | list[schema
     if not items:
         raise HTTPException(status_code=400, detail="No sensor data provided")
 
-    batch_to_flush: list[dict] = []
+    batches_to_flush: list[list[dict]] = []
     buffered_count = 0
     inserted_count = 0
     flushed = False
@@ -339,24 +339,26 @@ async def create_sensor_data(sensor_data: schemas.SensorDataCreate | list[schema
 
         async with buffer_lock:
             sensor_buffer.append(data_to_buffer)
-            if len(sensor_buffer) >= BUFFER_SIZE:
-                batch_to_flush = sensor_buffer[:]
-                sensor_buffer.clear()
+            while len(sensor_buffer) >= BUFFER_SIZE:
+                batches_to_flush.append(sensor_buffer[:BUFFER_SIZE])
+                del sensor_buffer[:BUFFER_SIZE]
                 logger.info(f"💾 Buffer full ({BUFFER_SIZE} items), flushing to database")
             buffered_count = len(sensor_buffer)
 
-    if batch_to_flush:
+    for batch_index, batch_to_flush in enumerate(batches_to_flush):
         try:
-            saved_data = await asyncio.to_thread(flush_sensor_batch_sync, batch_to_flush)
-            inserted_count = len(saved_data)
+            batch_saved_data = await asyncio.to_thread(flush_sensor_batch_sync, batch_to_flush)
+            saved_data.extend(batch_saved_data)
+            inserted_count += len(batch_saved_data)
             flushed = True
-            logger.info(f"✅ Saved {inserted_count} records to database")
-            for record in saved_data:
+            logger.info(f"✅ Saved {len(batch_saved_data)} records to database")
+            for record in batch_saved_data:
                 await broadcast_sensor(record)
         except Exception as e:
             logger.error(f"❌ Error flushing to database: {e}")
             async with buffer_lock:
-                sensor_buffer[0:0] = batch_to_flush
+                pending_batches = batches_to_flush[batch_index:]
+                sensor_buffer[0:0] = [item for pending_batch in pending_batches for item in pending_batch]
                 buffered_count = len(sensor_buffer)
             raise HTTPException(status_code=500, detail="Failed to flush buffered measurements to database")
 
